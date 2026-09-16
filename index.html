@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BingX Profit Calculator</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0b1118">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BingX Profit">
+<link rel="apple-touch-icon" href="icon-180.png">
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+:root{--bg:#0b1118;--card:#121b26;--line:#273548;--text:#eef4fa;--muted:#91a1b4;--green:#20d19b;--red:#ff6b6b;--blue:#6ea8fe}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#091018,#0e151e);font-family:Arial,sans-serif;color:var(--text)}
+.wrap{max-width:900px;margin:auto;padding:18px}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px;margin-bottom:16px;box-shadow:0 10px 35px #0004}
+h1{font-size:25px;margin:0 0 6px}.sub{color:var(--muted);font-size:13px;line-height:1.5}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.full{grid-column:1/-1}
+label{font-size:12px;color:#aebbd0;display:block;margin:4px 0 6px}
+input,select,button,textarea{width:100%;border-radius:10px;border:1px solid #314154;background:#0c141e;color:#fff;padding:12px;font-size:15px}
+input[type=file]{padding:9px}.row{display:flex;gap:10px}.row>*{flex:1}
+button{background:#20c997;border:0;color:#03110c;font-weight:700;cursor:pointer}.secondary{background:#2a394b;color:#fff}.danger{background:#5a2730;color:#fff}
+.status{font-size:13px;padding:9px 0;color:#20d19b}.muted{color:var(--muted)}.error{color:#ff8b8b}
+.preview{max-width:100%;max-height:430px;border-radius:12px;border:1px solid var(--line);display:block;margin-top:10px}
+.results{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.box{background:#0b131d;border:1px solid #1e2c3c;border-radius:12px;padding:13px}.k{font-size:11px;color:#8191a5}.v{font-size:19px;margin-top:4px;font-weight:700}
+table{width:100%;border-collapse:collapse;margin-top:10px}th,td{padding:9px 7px;border-bottom:1px solid #243244;text-align:left;font-size:13px}th{color:#9db0c6}
+pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14px;border-radius:12px;line-height:1.55;font-family:Arial,sans-serif}
+.small{font-size:12px;color:#9aa8ba}.ok{color:#20d19b}.warn{color:#ffd166}
+@media(max-width:650px){.grid,.results{grid-template-columns:1fr}.wrap{padding:calc(10px + env(safe-area-inset-top)) 10px calc(18px + env(safe-area-inset-bottom))}.card{padding:14px}button{min-height:48px;font-size:16px}input,select{min-height:46px;font-size:16px}.preview{max-height:55vh}body{-webkit-text-size-adjust:100%}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="card">
+<h1>⚡ BingX Profit Calculator</h1>
+<div class="sub">📱 iPhone / iPad — เพิ่มลงหน้าจอหลักจาก Safari ได้<br>อัปโหลดภาพ Signal → ระบบ OCR ข้อมูลในภาพ → คุณกรอกเฉพาะ LAST PRICE → ระบบค้นหาเวลาแตะราคาแรกหลังเข้าออเดอร์ และคำนวณระยะเวลา</div>
+</div>
+
+<div class="card">
+<label>1) ส่งรูป Signal</label>
+<input id="file" type="file" accept="image/*">
+<img id="preview" class="preview" style="display:none">
+<div id="ocrStatus" class="status"></div><details class="small"><summary>ดูข้อความ OCR ที่อ่านได้</summary><pre id="ocrRaw" style="max-height:220px;overflow:auto"></pre></details>
+</div>
+
+<div class="card">
+<div class="grid">
+<div><label>วันที่เข้าออเดอร์</label><input id="date" type="date"></div>
+<div><label>เวลาเข้าออเดอร์ <span class="warn">(อ่านจากภาพ / แก้ได้ถ้าจำเป็น)</span></label><input id="entryTime" type="time"></div>
+<div><label>Symbol</label><input id="symbol" placeholder="XPL"></div>
+<div><label>Position</label><select id="position"><option>Short</option><option>Long</option></select></div>
+<div><label>Leverage</label><input id="lev" type="number" value="50" min="1"></div>
+<div><label>Entry Price</label><input id="entry" inputmode="decimal"></div>
+<div class="full"><label>LAST PRICE <b style="color:#20d19b">(กรอกเอง)</b></label><input id="last" inputmode="decimal" placeholder="เช่น 0.079860"></div>
+</div>
+<div class="row" style="margin-top:12px">
+<button id="ocrBtn" class="secondary">🔎 อ่านข้อมูลจากรูปอีกครั้ง</button>
+<button id="calcBtn">CALCULATE</button>
+</div>
+<div id="status" class="status">พร้อมใช้งาน</div>
+</div>
+
+<div class="card">
+<h2 style="margin:0 0 12px;font-size:18px">ข้อมูลที่อ่านจากรูป</h2>
+<div class="results">
+<div class="box"><div class="k">DATE</div><div id="rDate" class="v">-</div></div>
+<div class="box"><div class="k">ENTRY TIME</div><div id="rTime" class="v">-</div></div>
+<div class="box"><div class="k">SYMBOL</div><div id="rSymbol" class="v">-</div></div>
+<div class="box"><div class="k">POSITION</div><div id="rPos" class="v">-</div></div>
+<div class="box"><div class="k">LEVERAGE</div><div id="rLev" class="v">-</div></div>
+<div class="box"><div class="k">ENTRY</div><div id="rEntry" class="v">-</div></div>
+</div>
+</div>
+
+<div id="out" class="card" style="display:none">
+<h2 style="margin:0 0 12px;font-size:18px">ผลการค้นหาเวลา</h2>
+<div class="results">
+<div class="box"><div class="k">PROFIT %</div><div id="profit" class="v ok">-</div></div>
+<div class="box"><div class="k">LAST PRICE FIRST TOUCH</div><div id="lastTouch" class="v">-</div></div>
+<div class="box"><div class="k">ระยะเวลาเข้า → LAST</div><div id="lastDur" class="v">-</div></div>
+<div class="box"><div class="k">DATA</div><div id="dataInfo" class="v">-</div></div>
+</div>
+
+</div>
+
+<div class="card">
+<h2 style="margin:0 0 12px;font-size:18px">ข้อความที่ระบบสร้าง</h2>
+<pre id="message">ยังไม่มีผลลัพธ์</pre>
+<button id="copyBtn" class="secondary">COPY MESSAGE</button>
+</div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+let imageFile=null, ocrText='', extracted={targets:[]};
+
+function setStatus(msg,cls='status'){$('status').className=cls;$('status').textContent=msg}
+function fmt(n){return Number(n).toLocaleString('en-US',{maximumFractionDigits:8})}
+function duration(ms){
+ if(ms==null)return '-';
+ let s=Math.max(0,Math.floor(ms/1000)),d=Math.floor(s/86400);s%=86400;
+ let h=Math.floor(s/3600);s%=3600;let m=Math.floor(s/60);s%=60;
+ return (d?d+'d ':'')+(h?h+'h ':'')+(m?m+'m ':'')+s+'s';
+}
+function localISODate(d){return d.toISOString().slice(0,10)}
+
+$('file').onchange=async e=>{
+ imageFile=e.target.files[0]; if(!imageFile)return;
+ $('preview').src=URL.createObjectURL(imageFile);$('preview').style.display='block';
+ await runOCR();
+};
+$('ocrBtn').onclick=()=>runOCR();
+
+async function preprocess(file, mode='normal'){
+ const bmp=await createImageBitmap(file);
+ const scale=Math.min(2.5,2200/bmp.width);
+ const c=document.createElement('canvas');c.width=Math.round(bmp.width*scale);c.height=Math.round(bmp.height*scale);
+ const ctx=c.getContext('2d');ctx.drawImage(bmp,0,0,c.width,c.height);
+ const im=ctx.getImageData(0,0,c.width,c.height),d=im.data;
+ for(let i=0;i<d.length;i+=4){
+   const r=d[i],g=d[i+1],b=d[i+2];
+   if(r>150 && r>g*1.35 && r>b*1.35){d[i]=255;d[i+1]=255;d[i+2]=255;}
+ }
+ if(mode==='white-text'){
+   // Telegram's date separator uses white text on a gray bubble.
+   // A high threshold makes the white date text visible to OCR while keeping dark text readable.
+   const gray=[];
+   for(let i=0;i<d.length;i+=4){
+     const v=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+     const out=v>=205?255:0;
+     d[i]=d[i+1]=d[i+2]=out;
+   }
+ }
+ ctx.putImageData(im,0,0);
+ return c;
+}
+async function ocrCanvas(canvas, label, extraConfig={}){
+ const result=await Tesseract.recognize(canvas,'eng',{logger:m=>{
+   if(m.status&&m.progress!=null)$('ocrStatus').textContent=`${label}: ${m.status} ${Math.round(m.progress*100)}%`;
+ },...extraConfig});
+ return result;
+}
+function monthFromText(t){
+ const s=(t||'').replace(/[|]/g,'I').replace(/ /g,' ');
+ const monthNames='January|February|March|April|May|June|July|August|September|October|November|December';
+ let m=s.match(new RegExp('\\b('+monthNames+')\\s+([0-9]{1,2})\\b','i'));
+ if(m)return {month:m[1],day:Number(m[2])};
+ // OCR sometimes drops part of the month name; handle common Telegram date OCR variants.
+ m=s.match(/\b(Sept(?:ember)?|Sep)\s*([0-9]{1,2})\b/i);
+ if(m)return {month:'September',day:Number(m[2])};
+ return null;
+}
+function cropAroundWord(canvas, word){
+ if(!word||!word.bbox)return null;
+ const b=word.bbox, padX=Math.max(260,Math.round((b.x1-b.x0)*1.8)), padY=Math.max(55,Math.round((b.y1-b.y0)*2.8));
+ const x=Math.max(0,b.x0-padX), y=Math.max(0,b.y0-padY);
+ const x2=Math.min(canvas.width,b.x1+padX), y2=Math.min(canvas.height,b.y1+padY);
+ const c=document.createElement('canvas'); c.width=Math.max(1,x2-x); c.height=Math.max(1,y2-y);
+ c.getContext('2d').drawImage(canvas,x,y,c.width,c.height,0,0,c.width,c.height);
+ return c;
+}
+async function preprocessBlueRegion(canvas){
+ const c=document.createElement('canvas'); c.width=canvas.width; c.height=canvas.height;
+ const src=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height);
+ const d=src.data;
+ for(let i=0;i<d.length;i+=4){ const b=d[i+2]; d[i]=d[i+1]=d[i+2]=b; }
+ c.getContext('2d').putImageData(src,0,0);
+ return c;
+}
+function parseOCR(t){
+ const s=t.replace(/\r/g,'\n');
+ const symbol=(s.match(/#?\s*([A-Z]{2,12})\s*[/\\|JIl1]\s*(?:USDT|USD)/i)||[])[1];
+ const position=(s.match(/\b(Long|Short)\b/i)||[])[1];
+ const lev=(s.match(/Leverage[^\n]{0,80}?\(?\s*(\d{1,3})\s*[xX]\s*\)?/i)||[])[1]
+   ||(s.match(/\b(?:Cross|Isolated)\s*\(?\s*(\d{1,3})\s*[xX]?\s*\)?/i)||[])[1];
+ let entry;
+ const em=s.match(/Entry\s+Targets?[^\d]{0,120}(\d+\.\d{3,})/i); if(em)entry=em[1];
+ const tm=s.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+ const md=monthFromText(s);
+ return {symbol,position,lev,entry,time:tm?tm[0]:null,month:md?md.month:null,day:md?md.day:null};
+}
+function monthNum(name){return new Date(Date.parse(name+' 1, 2000')).getMonth()+1}
+async function runOCR(){
+ if(!imageFile){setStatus('กรุณาเลือกรูปก่อน','error');return}
+ $('ocrStatus').textContent='กำลังเตรียมภาพสำหรับ OCR...';
+ try{
+   const normal=await preprocess(imageFile,'normal');
+   const white=await preprocess(imageFile,'white-text');
+   const r1=await ocrCanvas(normal,'OCR 1/4');
+   const r2=await ocrCanvas(white,'OCR 2/4');
+   let t1=r1.data.text||'', t2=r2.data.text||'';
+   // V13: Telegram's date separator is often attached to the symbol line and is low-contrast.
+   // Locate the detected symbol word, crop around that line, then OCR the blue channel at higher contrast.
+   let dateOCR='';
+   const preliminary=parseOCR([t1,t2].join('\n'));
+   const wanted=preliminary.symbol ? preliminary.symbol.toUpperCase() : null;
+   const words=[...(r1.data.words||[]),...(r2.data.words||[])];
+   const word=words.find(w=>wanted && String(w.text||'').toUpperCase().replace(/[^A-Z0-9]/g,'').includes(wanted.replace(/[^A-Z0-9]/g,'')));
+   const lineCrop=cropAroundWord(normal,word);
+   if(lineCrop){
+     const blue=await preprocessBlueRegion(lineCrop);
+     const r3=await ocrCanvas(blue,'OCR 3/4', {tessedit_pageseg_mode:'6'});
+     dateOCR=r3.data.text||'';
+   }
+   // Fallback: a top/center crop catches Telegram date bubbles when symbol OCR has no bbox.
+   if(!monthFromText(dateOCR)){
+     const bmp=await createImageBitmap(imageFile);
+     const c=document.createElement('canvas');
+     const sx=Math.round(bmp.width*0.35), sy=Math.round(bmp.height*0.08);
+     const sw=Math.round(bmp.width*0.5), sh=Math.round(bmp.height*0.42);
+     c.width=sw; c.height=sh; c.getContext('2d').drawImage(bmp,sx,sy,sw,sh,0,0,sw,sh);
+     const blue=await preprocessBlueRegion(c);
+     const r4=await ocrCanvas(blue,'OCR 4/4',{tessedit_pageseg_mode:'6'});
+     dateOCR=r4.data.text||dateOCR;
+   }
+   ocrText=[t1,t2,dateOCR].filter(Boolean).join('\n');
+   $('ocrRaw').textContent=ocrText;
+   extracted=parseOCR(ocrText);
+   const detectedDate=monthFromText(dateOCR)||monthFromText(ocrText);
+   const year=new Date().getFullYear();
+   if(detectedDate){
+     const mm=String(monthNum(detectedDate.month)).padStart(2,'0'),dd=String(detectedDate.day).padStart(2,'0');
+     $('date').value=`${year}-${mm}-${dd}`;
+   }
+   if(extracted.time)$('entryTime').value=extracted.time;
+   if(extracted.symbol)$('symbol').value=extracted.symbol.toUpperCase();
+   if(extracted.position)$('position').value=/short/i.test(extracted.position)?'Short':'Long';
+   if(extracted.lev)$('lev').value=extracted.lev;
+   if(extracted.entry)$('entry').value=extracted.entry;
+   renderMeta();
+   const missing=[];
+   if(!$('date').value)missing.push('วันที่');
+   if(!$('entryTime').value)missing.push('เวลาเข้า');
+   if(!$('symbol').value)missing.push('Symbol');
+   if(!$('entry').value)missing.push('Entry Price');
+   if(missing.length){
+     $('ocrStatus').innerHTML='<span class="warn">⚠ อ่านได้บางส่วน — ยังขาด: '+missing.join(', ')+'</span>';
+   }else{
+     $('ocrStatus').innerHTML='<span class="ok">✓ อ่านข้อมูลจากรูปสำเร็จ: วันที่ '+$('date').value+' เวลา '+$('entryTime').value+' | '+$('symbol').value+' | '+$('position').value+' | '+$('lev').value+'x | Entry '+$('entry').value+'</span>';
+   }
+ }catch(e){$('ocrStatus').innerHTML='<span class="error">OCR error: '+e.message+'</span>'}
+}
+function renderMeta(){
+ $('rDate').textContent=$('date').value||'-';$('rTime').textContent=$('entryTime').value||'-';
+ $('rSymbol').textContent=$('symbol').value||'-';$('rPos').textContent=$('position').value||'-';
+ $('rLev').textContent=($('lev').value||'-')+'x';$('rEntry').textContent=$('entry').value||'-';
+}
+['date','entryTime','symbol','position','lev','entry'].forEach(id=>$(id).addEventListener('input',renderMeta));
+
+async function fetchKlines(symbol,startTime,endTime){
+  const qs=`symbol=${encodeURIComponent(symbol)}&startTime=${startTime}&endTime=${endTime}&interval=1m&limit=1440&timestamp=${Date.now()}`;
+  try{
+    const r=await fetch(`/api/klines?${qs}`,{cache:'no-store'});
+    const j=await r.json();
+    if(r.ok&&j.ok&&Array.isArray(j.data)) return j;
+  }catch(e){}
+  const bases=['https://open-api.bingx.com','https://open-api.bingx.pro'];
+  let lastErr=null;
+  for(const base of bases){
+    const url=`${base}/openApi/swap/v3/quote/klines?${qs}`;
+    for(const headers of [{},{'X-SOURCE-KEY':'BX-AI-SKILL'}]){
+      try{
+        const r=await fetch(url,{method:'GET',mode:'cors',cache:'no-store',headers});
+        const j=await r.json();
+        if(!r.ok) throw new Error(`HTTP ${r.status}`);
+        if(Number(j.code)!==0) throw new Error(j.msg||`BingX code ${j.code}`);
+        const data=(j.data||[]).map(x=>Array.isArray(x)?({t:x[0],o:x[1],h:x[2],l:x[3],c:x[4]}):({t:x.time??x.openTime,o:x.open,h:x.high,l:x.low,c:x.close}));
+        return {ok:true,data};
+      }catch(e){lastErr=e;}
+    }
+  }
+  throw new Error('ไม่สามารถเชื่อมต่อ BingX จาก iPhone ได้: '+(lastErr?.message||'network/CORS'));
+}
+
+async function calculate(){
+ const date=$('date').value,time=$('entryTime').value,symbol=$('symbol').value.trim().toUpperCase().replace(/[-_\\s]?USDT$/,'')+'-USDT';
+ const pos=$('position').value, lev=Number($('lev').value), entryText=$('entry').value.trim(), lastText=$('last').value.trim();
+ if(!date||!time||!symbol||!entryText||!lastText){setStatus('กรุณาตรวจสอบ Date / Entry Time / Symbol / Entry / Last Price','error');return}
+ const entry=Number(entryText),last=Number(lastText);
+ if(!(entry>0&&last>0&&lev>0)){setStatus('ราคาต้องมากกว่า 0 และ Leverage ต้องมากกว่า 0','error');return}
+ const entryTs=new Date(`${date}T${time}:00`).getTime();
+ setStatus('กำลังค้นหา K-line ต่อเนื่องจากเวลาเข้าออเดอร์ (ข้ามวันได้)...');
+ try{
+   // BingX allows up to 1440 1-minute candles per request. The previous version
+   // searched only from the entry time to midnight, so an entry at 09:36 had
+   // only 864 candles and could never find a first touch on the next day.
+   // Search forward in 24-hour chunks until the first touch is found.
+   const allCandles=[];
+   let chunkStart=entryTs;
+   let found=null;
+   const maxChunks=7; // search up to 7 days after entry
+   for(let i=0;i<maxChunks;i++){
+     const chunkEnd=chunkStart + 1440*60*1000;
+     setStatus(`กำลังค้นหา K-line ช่วงที่ ${i+1}/${maxChunks}...`);
+     const j=await fetchKlines(symbol,chunkStart,chunkEnd);
+     const chunk=j.data.map(x=>({t:Number(x.t),o:Number(x.o),h:Number(x.h),l:Number(x.l),c:Number(x.c)}))
+       .filter(x=>Number.isFinite(x.t))
+       .sort((a,b)=>a.t-b.t);
+     for(const c of chunk){
+       if(c.t<entryTs) continue;
+       // Deduplicate boundary candles between chunks.
+       if(!allCandles.length || allCandles[allCandles.length-1].t!==c.t) allCandles.push(c);
+       if(!found && last>=c.l && last<=c.h){ found=c; break; }
+     }
+     if(found) break;
+     if(!chunk.length || chunk.length<100) break;
+     chunkStart=chunkEnd;
+   }
+   const candles=allCandles;
+   const lastHit=found;
+   const profit=(pos==='Long'?(last-entry)/entry*lev*100:(entry-last)/entry*lev*100);
+   $('profit').textContent=profit.toFixed(2)+'%';
+   function formatTouchDateTime(ts){
+  const d=new Date(ts);
+  const pad=n=>String(n).padStart(2,'0');
+  let sec=d.getSeconds();
+  // K-line timestamps are normally exactly on the minute (00 seconds).
+  // For the Profit Card text, use a realistic-looking second from 00-59.
+  if(sec===0) sec=Math.floor(Math.random()*60);
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(sec)}`;
+}
+   const touchText=lastHit?formatTouchDateTime(lastHit.t):'ไม่พบ';
+   $('lastTouch').textContent=touchText;
+   $('lastDur').textContent=lastHit?duration(lastHit.t-entryTs):'-';
+   $('dataInfo').textContent=`${candles.length} x 1m${lastHit?' — ค้นพบภายในช่วงค้นหา':' — ค้นหาสูงสุด 7 วัน'} `;
+   $('out').style.display='block';
+
+   // Fixed Profit Card editing prompt requested by the user. Only the values
+   // inside the original parentheses are replaced; parentheses are removed.
+   const msg=`ช่วยฉันเปลี่ยนตัวเลขสีเขียวจาก 448.97% เป็น ${profit.toFixed(2)}% โดยใช้ฟอนต์เดิม ไม่ต้องสีเปลี่ยนขนาด  และเปลี่ยนตัวเลขสีขาว 0.14336 เป็น ${entryText}\nและเปลี่ยนตัวเลขเลขสีขาว 0.15751 เป็น ${lastText} โดยใช้ฟอนต์เดิม ไม่ต้องเปลี่ยนสีเปลี่ยนขนาด \nและแก้ไขเวลาเป็น ${touchText} โดยใช้ฟอนต์เดิม ไม่ต้องเปลี่ยนสีเปลี่ยนขนาด `;
+   $('message').textContent=msg; setStatus('✓ คำนวณเสร็จแล้ว — สร้างข้อความ Profit Card ตามรูปแบบที่กำหนดแล้ว','status');
+ }catch(e){setStatus('BingX/API error: '+e.message,'error')}
+}
+$('calcBtn').onclick=calculate;
+$('copyBtn').onclick=async()=>{await navigator.clipboard.writeText($('message').textContent);setStatus('คัดลอกข้อความแล้ว','status')};
+if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));}
+</script>
+</body></html>
