@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BingX Profit Calculator V32 SMART OCR</title>
+<title>BingX Profit Calculator V33 SMART OCR</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0b1118">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -273,34 +273,99 @@ function enhanceForText(c, mode){
 
 // SMART OCR: one full-page pass + two deterministic field passes only when needed.
 // Date and time are treated as separate fields, not guessed from unrelated UI text.
+function binarizeCrop(c, mode){
+ const ctx=c.getContext('2d',{willReadFrequently:true});
+ const im=ctx.getImageData(0,0,c.width,c.height),d=im.data;
+ for(let i=0;i<d.length;i+=4){
+   const r=d[i],g=d[i+1],b=d[i+2];
+   const mx=Math.max(r,g,b),mn=Math.min(r,g,b);
+   const sat=mx?((mx-mn)/mx):0;
+   const gray=0.299*r+0.587*g+0.114*b;
+   let keep;
+   if(mode==='date'){
+     // Telegram date badge = light/near-white letters on a beige/grey pill.
+     // Keep bright, low-saturation pixels so the coloured pill is suppressed.
+     keep=(gray>=205 && sat<0.18) || gray>=235;
+   }else{
+     // Timestamp = dark grey digits on a pale message background.
+     keep=(gray<175);
+   }
+   const v=keep?0:255;
+   d[i]=d[i+1]=d[i+2]=v;
+ }
+ ctx.putImageData(im,0,0); return c;
+}
+
+function cleanTimeCandidate(raw){
+ let s=(raw||'').replace(/[OoQ]/g,'0').replace(/[IlL]/g,'1').replace(/[Ss]/g,'5');
+ s=s.replace(/[;,\.]/g,':');
+ // Accept common OCR joins such as 621:04 / 811:45 / 8509:35.
+ const hits=[...s.matchAll(/(?:^|[^0-9])([0-9]{1,6})\s*:\s*([0-5][0-9])(?![0-9])/g)];
+ const vals=[];
+ for(const m of hits){
+   let digits=m[1];
+   // Prefer the last 1–2 digits before ':'; Telegram hours are 00–23.
+   for(const hstr of [digits.slice(-2),digits.slice(-1)]){
+     if(!hstr)continue;
+     const h=Number(hstr),mm=Number(m[2]);
+     if(h>=0&&h<=23){
+       const t=`${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+       if(!(h===0&&mm===0)) vals.push(t);
+     }
+   }
+ }
+ return vals.length?vals[vals.length-1]:null;
+}
+
+async function targetedDateOCR(bmp){
+ const variants=[
+   cropCanvas(bmp,0.31,0.075,0.40,0.18,6),
+   cropCanvas(bmp,0.28,0.12,0.46,0.16,6)
+ ];
+ for(let i=0;i<variants.length;i++){
+   let c=variants[i].c;
+   // First pass keeps the original antialiasing; second uses a high-contrast mask.
+   let r=await ocrCanvas(c,'date-target-'+i,{tessedit_pageseg_mode:'6'});
+   let d=monthFromText(r.data.text||'');
+   if(d)return {date:d,raw:r.data.text||''};
+   const b=binarizeCrop(c,'date');
+   r=await ocrCanvas(b,'date-mask-'+i,{tessedit_pageseg_mode:'7'});
+   d=monthFromText(r.data.text||'');
+   if(d)return {date:d,raw:r.data.text||''};
+ }
+ return {date:null,raw:''};
+}
+
+async function targetedTimeOCR(bmp){
+ // The Telegram timestamp is at the bottom-right of the white signal bubble.
+ // This avoids TP/SL numbers in the middle of the message.
+ const variants=[
+   cropCanvas(bmp,0.36,0.84,0.38,0.15,6),
+   cropCanvas(bmp,0.30,0.88,0.48,0.11,7)
+ ];
+ for(let i=0;i<variants.length;i++){
+   let r=await ocrCanvas(variants[i].c,'time-target-'+i,{tessedit_pageseg_mode:'6',tessedit_char_whitelist:'0123456789:'});
+   let t=cleanTimeCandidate(r.data.text||'')||parseTimeText(r.data.text||'');
+   if(t)return {time:t,raw:r.data.text||''};
+   const b=binarizeCrop(variants[i].c,'time');
+   r=await ocrCanvas(b,'time-mask-'+i,{tessedit_pageseg_mode:'6',tessedit_char_whitelist:'0123456789:'});
+   t=cleanTimeCandidate(r.data.text||'')||parseTimeText(r.data.text||'');
+   if(t)return {time:t,raw:r.data.text||''};
+ }
+ return {time:null,raw:''};
+}
+
 async function smartFieldOCR(imageFile, fullText){
- const bmp=await createImageBitmap(imageFile), W=bmp.width,H=bmp.height;
- let date=monthFromText(fullText), time=parseTimeText(fullText), debug=[];
- // DATE: Telegram's pill sits around x=30–70%. Its y-position changes when a
- // search/pinned banner exists, so use two narrow bands instead of one huge crop.
- if(!date){
-   const bands=[[0.055,0.18],[0.16,0.31]];
-   for(let i=0;i<bands.length && !date;i++){
-     const [y1,y2]=bands[i];
-     const q=cropCanvas(bmp,0.30,y1,0.40,y2-y1,7);
-     const r=await ocrCanvas(q.c,'date-band-'+i,{tessedit_pageseg_mode:'11'});
-     debug.push('DATE'+(i+1)+' '+(r.data.text||''));
-     date=monthFromText(r.data.text||'');
-   }
- }
- // TIME: the Telegram timestamp is always in the lower part of the message.
- // Search a broad lower region, then normalize OCR strings such as 621:04.
- if(!time){
-   const q=cropCanvas(bmp,0.18,0.62,0.70,0.34,5.5);
-   let r=await ocrCanvas(q.c,'time',{tessedit_pageseg_mode:'11',tessedit_char_whitelist:'0123456789:'});
-   time=parseTimeText(r.data.text||'');
-   if(!time){
-     const q2=cropCanvas(bmp,0.05,0.70,0.90,0.25,6);
-     r=await ocrCanvas(q2.c,'time2',{tessedit_pageseg_mode:'11',tessedit_char_whitelist:'0123456789:'});
-     time=parseTimeText(r.data.text||'');
-   }
-   debug.push('TIME '+(r.data.text||''));
- }
+ const bmp=await createImageBitmap(imageFile);
+ let date=null,time=null,debug=[];
+ // IMPORTANT: do not trust timestamps/months from the full-page OCR.
+ // They are mixed with phone/UI digits. Read the two Telegram fields from
+ // their own deterministic regions first.
+ const d=await targetedDateOCR(bmp); date=d.date; debug.push('DATE_TARGET '+d.raw);
+ const tm=await targetedTimeOCR(bmp); time=tm.time; debug.push('TIME_TARGET '+tm.raw);
+ // Last-resort full OCR only if a targeted field failed.
+ if(!date){date=monthFromText(fullText); if(date)debug.push('DATE_FALLBACK_FULL');}
+ if(!time){time=parseTimeText(fullText); if(time)debug.push('TIME_FALLBACK_FULL');}
  return {date,time,debug};
 }
 
@@ -374,7 +439,10 @@ async function fetchKlines(symbol,startTime,endTime){
    {name:'BingX PRO',url:origin2,headers:{'X-SOURCE-KEY':'BX-AI-SKILL'}},
    {name:'AllOrigins',url:'https://api.allorigins.win/raw?url='+encodeURIComponent(origin)},
    {name:'CorsProxy',url:'https://corsproxy.io/?url='+encodeURIComponent(origin)},
-   {name:'Jina',url:'https://r.jina.ai/'+origin}
+   {name:'Jina',url:'https://r.jina.ai/'+origin},
+   {name:'Isomorphic CORS',url:'https://cors.isomorphic-git.org/'+origin},
+   {name:'CodeTabs',url:'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(origin)},
+   {name:'ThingProxy',url:'https://thingproxy.freeboard.io/fetch/'+origin}
  ];
  let lastErr=null;
  for(const item of candidates){
