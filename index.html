@@ -42,7 +42,7 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 <option value="gemini-3.8-flash">Gemini 3.8 Flash</option>
 <option value="gemini-3.7-flash">Gemini 3.7 Flash</option>
 <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
-<option value="gemini-2.5-flash" selected>Gemini 2.5 Flash</option>
+<option value="gemini-3.6-flash" selected>Gemini 3.6 Flash</option>
 </select></div>
 <div style="margin-top:10px"><label>Gemini API Key</label><input id="geminiKey" type="password" autocomplete="off" placeholder="วาง Gemini API Key ของคุณที่นี่"></div>
 <div class="row" style="margin-top:8px"><button id="saveKeyBtn" class="secondary">💾 บันทึก Key ในเครื่อง</button><button id="clearKeyBtn" class="danger">ล้าง Key</button></div>
@@ -114,7 +114,7 @@ const GEMINI_KEY_STORAGE='bingx_gemini_api_key';
 const GEMINI_MODEL_STORAGE='bingx_gemini_model';
 const MAX_IMAGE_EDGE=1800;
 let currentFile=null;
-$('geminiModel').value=localStorage.getItem(GEMINI_MODEL_STORAGE)||'gemini-2.5-flash';
+$('geminiModel').value=localStorage.getItem(GEMINI_MODEL_STORAGE)||'gemini-3.6-flash';
 $('geminiModel').onchange=()=>localStorage.setItem(GEMINI_MODEL_STORAGE,$('geminiModel').value);
 $('geminiKey').value=localStorage.getItem(GEMINI_KEY_STORAGE)||'';
 $('saveKeyBtn').onclick=()=>{const k=$('geminiKey').value.trim();if(k){localStorage.setItem(GEMINI_KEY_STORAGE,k);$('ocrStatus').innerHTML='<span class="ok">✓ บันทึก Gemini API Key ในเครื่องแล้ว</span>';}else{localStorage.removeItem(GEMINI_KEY_STORAGE);$('ocrStatus').textContent='ล้าง Gemini API Key แล้ว';}};
