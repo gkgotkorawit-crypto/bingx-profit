@@ -288,20 +288,30 @@ async function fetchKlines(symbol,startTime,endTime){
   }catch(e){}
   const bases=['https://open-api.bingx.com','https://open-api.bingx.pro'];
   let lastErr=null;
+
+  // GitHub Pages is static hosting, so /api/klines is unavailable and
+  // iOS Safari may block direct BingX requests because of CORS.
+  // Try a CORS relay first, then direct BingX as a fallback.
   for(const base of bases){
     const url=`${base}/openApi/swap/v3/quote/klines?${qs}`;
-    for(const headers of [{},{'X-SOURCE-KEY':'BX-AI-SKILL'}]){
+    const attempts=[
+      {url:`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, opts:{method:'GET',cache:'no-store'}},
+      {url, opts:{method:'GET',mode:'cors',cache:'no-store',headers:{'X-SOURCE-KEY':'BX-AI-SKILL'}}},
+      {url, opts:{method:'GET',mode:'cors',cache:'no-store'}}
+    ];
+    for(const a of attempts){
       try{
-        const r=await fetch(url,{method:'GET',mode:'cors',cache:'no-store',headers});
-        const j=await r.json();
+        const r=await fetch(a.url,a.opts);
         if(!r.ok) throw new Error(`HTTP ${r.status}`);
+        const j=await r.json();
         if(Number(j.code)!==0) throw new Error(j.msg||`BingX code ${j.code}`);
         const data=(j.data||[]).map(x=>Array.isArray(x)?({t:x[0],o:x[1],h:x[2],l:x[3],c:x[4]}):({t:x.time??x.openTime,o:x.open,h:x.high,l:x.low,c:x.close}));
-        return {ok:true,data};
+        if(data.length) return {ok:true,data};
+        throw new Error('BingX returned no kline data');
       }catch(e){lastErr=e;}
     }
   }
-  throw new Error('ไม่สามารถเชื่อมต่อ BingX จาก iPhone ได้: '+(lastErr?.message||'network/CORS'));
+  throw new Error('BingX: iPhone ถูกบล็อกการเชื่อมต่อโดยตรง (CORS) และ CORS relay ไม่ตอบสนอง: '+(lastErr?.message||'network error'));
 }
 
 async function calculate(){
