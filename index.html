@@ -270,41 +270,133 @@ function extractTimeStrict(raw){
   for(const m of s.matchAll(/(\d{1,6})\s*:\s*([0-5]\d)/g))add(m[1],m[2],m[1].length===2?'two-digit':'joined');
   return [...new Map(out.map(x=>[x.time,x])).values()];
 }
-async function readSignalFields(signal){
-  const W=signal.width,H=signal.height;
-  // These regions are relative to the Telegram message itself, not the outer screenshot.
-  const symbolR=await ocrRegionText(signal,[.05,.06,.62,.18],10,'6');
-  const dateCanvas=grayThreshold(cropAbsolute(signal,{x:W*.22,y:H*.045,w:W*.62,h:H*.20},1),200);
-  const dateR=await ocrRegionText(dateCanvas,[0,0,1,1],10,'11');
-  const bodyR=await ocrRegionText(signal,[.05,.22,.82,.30],7,'6');
-  const entryR=await ocrRegionText(signal,[.05,.34,.70,.18],8,'6');
-  const timeBase=cropAbsolute(signal,{x:W*.43,y:H*.925,w:W*.40,h:H*.075},12);
-  const timeTexts=[];
-  for(const [name,c] of [['normal',timeBase],['thr',grayThreshold(timeBase,190)]]){
-    const r=await ocrCanvas(c,'time-'+name,{tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789:'},{text:true});timeTexts.push((r.data.text||'').trim());
+
+let contractBasesPromise=null;
+async function getBingXContractBases(){
+  if(contractBasesPromise) return contractBasesPromise;
+  contractBasesPromise=(async()=>{
+    const urls=[
+      'https://open-api.bingx.com/openApi/swap/v2/quote/contracts?timestamp='+Date.now(),
+      'https://open-api.bingx.pro/openApi/swap/v2/quote/contracts?timestamp='+Date.now()
+    ];
+    for(const u of urls){
+      try{
+        const r=await fetch(u,{headers:{'X-SOURCE-KEY':'BX-AI-SKILL'}});
+        if(!r.ok) continue;
+        const j=await r.json();
+        const arr=Array.isArray(j?.data)?j.data:[];
+        const bases=arr.map(x=>String(x?.symbol||'').toUpperCase().replace(/-USDT$/,'')).filter(x=>/^[A-Z0-9]{2,20}$/.test(x));
+        if(bases.length) return [...new Set(bases)];
+      }catch(e){}
+    }
+    return [];
+  })();
+  return contractBasesPromise;
+}
+function compactOCRToken(s){
+  return String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+}
+function symbolDistance(a,b){
+  a=compactOCRToken(a);b=compactOCRToken(b);
+  const m=a.length,n=b.length,dp=Array.from({length:m+1},()=>Array(n+1).fill(0));
+  for(let i=0;i<=m;i++)dp[i][0]=i;for(let j=0;j<=n;j++)dp[0][j]=j;
+  const conf={ 'I':'L','L':'I','J':'I','N':'U','U':'V','V':'U','O':'Q','Q':'O','S':'5','5':'S','Z':'2','2':'Z','B':'8','8':'B' };
+  for(let i=1;i<=m;i++)for(let j=1;j<=n;j++){
+    let cost=a[i-1]===b[j-1]?0:1;
+    if(conf[a[i-1]]===b[j-1] || conf[b[j-1]]===a[i-1]) cost=.35;
+    dp[i][j]=Math.min(dp[i-1][j]+1,dp[i][j-1]+1,dp[i-1][j-1]+cost);
   }
-  const allMain=[symbolR.texts[0],bodyR.texts[0],entryR.texts[0]].join('\n');
-  const symbol=cleanSymbolText(symbolR.texts[0])||cleanSymbolText(allMain);
-  const position=cleanPosition(bodyR.texts[0])||cleanPosition(allMain);
-  const lev=cleanLeverage(bodyR.texts[0])||cleanLeverage(allMain);
-  const entry=cleanEntry(entryR.texts[0])||cleanEntry(allMain);
-  const date=parseHumanDate(dateR.texts[0]);
-  const tc=timeTexts.flatMap(extractTimeStrict);const counts=new Map();for(const q of tc)counts.set(q.time,(counts.get(q.time)||0)+1);
+  return dp[m][n];
+}
+function extractSymbolOCRCandidates(texts){
+  const out=[];
+  for(const raw of texts){
+    const t=String(raw||'').replace(/\r/g,'\n');
+    const direct=[...t.matchAll(/#?\s*([A-Z][A-Z0-9]{1,19})\s*[\/#|JIl1\s]*USDT\b/ig)];
+    for(const m of direct) out.push({token:compactOCRToken(m[1]),kind:'direct',raw:m[0]});
+    // Tesseract sometimes drops the slash/hash and returns e.g. NIJUSDT or XPLIUSDT.
+    const joined=[...t.matchAll(/\b([A-Z][A-Z0-9]{1,19})USDT\b/ig)];
+    for(const m of joined) out.push({token:compactOCRToken(m[1]),kind:'joined',raw:m[0]});
+  }
+  return out.filter(x=>x.token.length>=2);
+}
+async function resolveAuthoritativeSymbol(texts){
+  const candidates=extractSymbolOCRCandidates(texts);
+  const exact=candidates.find(x=>/^[A-Z0-9]{2,20}$/.test(x.token));
+  const bases=await getBingXContractBases();
+  if(!bases.length) return exact?.token||null;
+  const scored=[];
+  for(const c of candidates){
+    for(const b of bases){
+      const d=symbolDistance(c.token,b);
+      const maxD=b.length<=3?1.9:(b.length<=5?1.6:2.2);
+      if(d<=maxD) scored.push({symbol:b,d,kind:c.kind,token:c.token,score:(c.kind==='direct'?3:2)-d});
+    }
+  }
+  scored.sort((a,b)=>b.score-a.score||a.d-b.d||b.symbol.length-a.symbol.length);
+  return scored[0]?.symbol||exact?.token||null;
+}
+async function readSignalFields(signal,fullText=''){ 
+  const W=signal.width,H=signal.height;
+  async function one(reg,scale,psm,whitelist=''){
+    const base=cropAbsolute(signal,reg,scale),cfg={tessedit_pageseg_mode:psm};
+    if(whitelist)cfg.tessedit_char_whitelist=whitelist;
+    const r=await ocrCanvas(base,'semantic',cfg,{text:true});return (r.data.text||'').trim();
+  }
+  const headerReg={x:W*.045,y:H*.045,w:W*.90,h:H*.22};
+  const headerTexts=[await one(headerReg,10,'6'),await one(headerReg,10,'11')];
+  const bodyReg={x:W*.04,y:H*.18,w:W*.90,h:H*.62};
+  const bodyTexts=[await one(bodyReg,7,'6'),await one(bodyReg,7,'11')];
+  const entryReg={x:W*.04,y:H*.27,w:W*.82,h:H*.30};
+  const entryTexts=[await one(entryReg,9,'6','0123456789.'),await one(entryReg,9,'11','0123456789.')];
+
+  // AUTHORITATIVE SYMBOL SOURCE: full-image OCR / TSV text. A valid result MUST
+  // contain /USDT or /USD, so the webpage's old Symbol field (e.g. XPLI) can never win.
+  const sources=[fullText,...headerTexts,...bodyTexts];
+  // AUTHORITATIVE SYMBOL: resolve OCR token against the live BingX perpetual-contract
+  // list. This prevents page-field contamination (XPLI) and corrects OCR mutations
+  // such as NIJUSDT -> UNI-USDT when the actual contract exists.
+  let symbol=await resolveAuthoritativeSymbol(sources);
+
+  // DATE is taken from the Signal header/full OCR. Today is resolved from device date.
+  let date=null;
+  for(const t of [fullText,...headerTexts]){const q=parseHumanDate(t);if(q){date=q;break;}}
+  const allBody=[fullText,...bodyTexts].join('\n');
+  const position=cleanPosition(allBody);
+  const lev=cleanLeverage(allBody);
+  let entry=null;
+  for(const t of entryTexts){const q=cleanEntry(t);if(q){entry=q;break;}}
+  if(!entry)entry=cleanEntry(allBody);
+
+  // Keep the proven V41 timestamp reader, but constrain it to the locked Signal region.
+  const timeBase=cropAbsolute(signal,{x:W*.43,y:H*.76,w:W*.38,h:H*.22},12);
+  const timeTexts=[];
+  for(const psm of ['6','7','8','13']){
+    const r=await ocrCanvas(timeBase,'time',{tessedit_pageseg_mode:psm,tessedit_char_whitelist:'0123456789:'},{text:true});
+    timeTexts.push((r.data.text||'').trim());
+  }
+  const tc=timeTexts.flatMap(extractTimeStrict), counts=new Map();
+  for(const q of tc){const weight=q.kind==='two-digit'?4:2;counts.set(q.time,(counts.get(q.time)||0)+weight);}
   const time=[...counts.entries()].sort((a,b)=>b[1]-a[1])[0]?.[0]||null;
-  return {symbol,position,lev,entry,date,time,debug:{symbol:symbolR.texts,body:bodyR.texts,entry:entryR.texts,date:dateR.texts,time:timeTexts,timeVotes:[...counts.entries()]}};
+  return {symbol,position,lev,entry,date,time,debug:{full:fullText,header:headerTexts,body:bodyTexts,entry:entryTexts,time:timeTexts,timeVotes:[...counts.entries()]}};
 }
 async function runOCR(){
  if(!imageFile){setStatus('กรุณาเลือกรูปก่อน','error');return}
- $('ocrStatus').textContent='กำลังสแกน V41 — Signal Lock OCR...';['date','entryTime','symbol','entry'].forEach(id=>$(id).value='');
+ $('ocrStatus').textContent='กำลังสแกน V45 — Full Signal OCR...';['date','entryTime','symbol','entry'].forEach(id=>$(id).value='');
  try{
-  const bmp=await createImageBitmap(imageFile);const region=await detectSignalRegion(bmp);const signal=cropAbsolute(bmp,region,1);
-  const f=await readSignalFields(signal);
+  const bmp=await createImageBitmap(imageFile);
+  // One full OCR pass is the anchor for Symbol/Date. It reliably sees #COIN/USDT
+  // even when the green Signal wallpaper confuses a local crop.
+  const full=await ocrCanvas(bmp,'full-signal',{tessedit_pageseg_mode:'11'},{text:true});
+  const region=await detectSignalRegion(bmp);
+  const signal=cropAbsolute(bmp,region,1);
+  const f=await readSignalFields(signal,(full.data.text||''));
   if(f.date)$('date').value=f.date;if(f.time)$('entryTime').value=f.time;if(f.symbol)$('symbol').value=f.symbol;
   if(f.position)$('position').value=f.position;if(f.lev)$('lev').value=f.lev;if(f.entry)$('entry').value=f.entry;
-  const dbg=[`REGION ${region.x},${region.y},${region.w},${region.h} (${region.method})`,`SYMBOL ${JSON.stringify(f.debug.symbol)}`,`BODY ${JSON.stringify(f.debug.body)}`,`ENTRY ${JSON.stringify(f.debug.entry)}`,`DATE ${JSON.stringify(f.debug.date)}`,`TIME ${JSON.stringify(f.debug.time)}`,`TIME_VOTES ${JSON.stringify(f.debug.timeVotes)}`];
+  const dbg=[`REGION ${region.x},${region.y},${region.w},${region.h} (${region.method})`,`FULL ${JSON.stringify(f.debug.full)}`,`HEADER ${JSON.stringify(f.debug.header)}`,`BODY ${JSON.stringify(f.debug.body)}`,`ENTRY ${JSON.stringify(f.debug.entry)}`,`TIME ${JSON.stringify(f.debug.time)}`,`TIME_VOTES ${JSON.stringify(f.debug.timeVotes)}`];
   $('ocrRaw').textContent=dbg.join('\n');renderMeta();
   const missing=[];if(!$('date').value)missing.push('วันที่');if(!$('entryTime').value)missing.push('เวลาเข้า');if(!$('symbol').value)missing.push('Symbol');if(!$('position').value)missing.push('Long/Short');if(!$('lev').value)missing.push('Leverage');if(!$('entry').value)missing.push('Entry Price');
-  if(missing.length)$('ocrStatus').innerHTML='<span class="warn">⚠ V41 อ่านได้บางส่วน — ยังขาด: '+missing.join(', ')+'</span>';else $('ocrStatus').innerHTML='<span class="ok">✓ V41 Signal Lock: '+$('date').value+' '+$('entryTime').value+' | '+$('symbol').value+' | '+$('position').value+' | '+$('lev').value+'x | Entry '+$('entry').value+'</span>';
+  if(missing.length)$('ocrStatus').innerHTML='<span class="warn">⚠ V45 อ่านได้บางส่วน — ยังขาด: '+missing.join(', ')+'</span>';else $('ocrStatus').innerHTML='<span class="ok">✓ V45 Full Signal OCR: '+$('date').value+' '+$('entryTime').value+' | '+$('symbol').value+' | '+$('position').value+' | '+$('lev').value+'x | Entry '+$('entry').value+'</span>';
  }catch(e){console.error(e);$('ocrStatus').innerHTML='<span class="error">OCR error: '+(e?.message||e)+'</span>'}
 }
 
