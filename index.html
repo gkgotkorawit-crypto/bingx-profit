@@ -128,9 +128,9 @@ async function preprocess(file, mode='normal'){
  c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);
  return c;
 }
-async function ocrCanvas(canvas,label,extraConfig={}){
+async function ocrCanvas(canvas,label,extraConfig={},output={text:true}){
  const worker=await getOCRWorker();
- return await worker.recognize(canvas,extraConfig,{text:true});
+ return await worker.recognize(canvas,extraConfig,output);
 }
 function levenshtein(a,b){
  const m=a.length,n=b.length; if(!m)return n;if(!n)return m;
@@ -299,74 +299,151 @@ function binarizeCrop(c, mode){
 function cleanTimeCandidate(raw){
  let s=(raw||'').replace(/[OoQ]/g,'0').replace(/[IlL]/g,'1').replace(/[Ss]/g,'5');
  s=s.replace(/[;,\.]/g,':');
- // Accept common OCR joins such as 621:04 / 811:45 / 8509:35.
- const hits=[...s.matchAll(/(?:^|[^0-9])([0-9]{1,6})\s*:\s*([0-5][0-9])(?![0-9])/g)];
  const vals=[];
+ // Common OCR joins: 621:04 -> 21:04, 811:45 -> 11:45, 8509:35 -> 09:35.
+ const hits=[...s.matchAll(/(?:^|[^0-9])([0-9]{1,6})\s*:\s*([0-5][0-9])(?![0-9])/g)];
  for(const m of hits){
-   let digits=m[1];
-   // Prefer the last 1–2 digits before ':'; Telegram hours are 00–23.
+   const digits=m[1],mm=Number(m[2]);
    for(const hstr of [digits.slice(-2),digits.slice(-1)]){
      if(!hstr)continue;
-     const h=Number(hstr),mm=Number(m[2]);
+     const h=Number(hstr);
      if(h>=0&&h<=23){
        const t=`${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
-       if(!(h===0&&mm===0)) vals.push(t);
+       if(!(h===0&&mm===0))vals.push(t);
      }
    }
+ }
+ // If OCR loses the colon entirely, take the last four digits as HHMM.
+ const digitsOnly=s.replace(/[^0-9]/g,'');
+ if(!vals.length && digitsOnly.length>=4){
+   const tail=digitsOnly.slice(-4),h=Number(tail.slice(0,2)),m=Number(tail.slice(2));
+   if(h<=23&&m<=59&&(h!==0||m!==0))vals.push(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
  }
  return vals.length?vals[vals.length-1]:null;
 }
 
-async function targetedDateOCR(bmp){
- const variants=[
-   cropCanvas(bmp,0.31,0.075,0.40,0.18,6),
-   cropCanvas(bmp,0.28,0.12,0.46,0.16,6)
- ];
- for(let i=0;i<variants.length;i++){
-   let c=variants[i].c;
-   // First pass keeps the original antialiasing; second uses a high-contrast mask.
-   let r=await ocrCanvas(c,'date-target-'+i,{tessedit_pageseg_mode:'6'});
-   let d=monthFromText(r.data.text||'');
-   if(d)return {date:d,raw:r.data.text||''};
-   const b=binarizeCrop(c,'date');
-   r=await ocrCanvas(b,'date-mask-'+i,{tessedit_pageseg_mode:'7'});
-   d=monthFromText(r.data.text||'');
-   if(d)return {date:d,raw:r.data.text||''};
+
+function symbolFromWords(words){
+ const hits=[];
+ for(const w of words){
+   const t=(w.text||'').replace(/\s+/g,'').replace(/[|\\]/g,'/');
+   const m=t.match(/#?([A-Z]{2,12})\/(?:USDT|USD)/i);
+   if(m && m[1].length>=2 && m[1].length<=12){
+     hits.push({symbol:m[1].toUpperCase(),x:w.x,y:w.y,w:w.w,h:w.h,conf:w.conf});
+   }
  }
- return {date:null,raw:''};
+ // Prefer the symbol in the signal message, not a search-bar hashtag.
+ hits.sort((a,b)=>(b.y-a.y)||((b.conf||0)-(a.conf||0)));
+ return hits.length?hits[0]:null;
 }
 
-async function targetedTimeOCR(bmp){
- // The Telegram timestamp is at the bottom-right of the white signal bubble.
- // This avoids TP/SL numbers in the middle of the message.
- const variants=[
-   cropCanvas(bmp,0.36,0.84,0.38,0.15,6),
-   cropCanvas(bmp,0.30,0.88,0.48,0.11,7)
- ];
- for(let i=0;i<variants.length;i++){
-   let r=await ocrCanvas(variants[i].c,'time-target-'+i,{tessedit_pageseg_mode:'6',tessedit_char_whitelist:'0123456789:'});
-   let t=cleanTimeCandidate(r.data.text||'')||parseTimeText(r.data.text||'');
-   if(t)return {time:t,raw:r.data.text||''};
-   const b=binarizeCrop(variants[i].c,'time');
-   r=await ocrCanvas(b,'time-mask-'+i,{tessedit_pageseg_mode:'6',tessedit_char_whitelist:'0123456789:'});
-   t=cleanTimeCandidate(r.data.text||'')||parseTimeText(r.data.text||'');
-   if(t)return {time:t,raw:r.data.text||''};
+async function targetedDateFromSymbol(bmp,symbolBox){
+ if(!symbolBox)return {date:null,raw:''};
+ const W=bmp.width,H=bmp.height;
+ // Telegram date badge is on the same line as the #SYMBOL/USDT token.
+ // Its X position follows the symbol, while Y is anchored to the symbol line.
+ const left=Math.max(0,symbolBox.x+symbolBox.w-12);
+ const top=Math.max(0,symbolBox.y-18);
+ const right=Math.min(W,left+420);
+ const bottom=Math.min(H,top+90);
+ const sw=Math.max(1,right-left), sh=Math.max(1,bottom-top);
+ const c=document.createElement('canvas');
+ c.width=Math.round(sw*5); c.height=Math.round(sh*5);
+ const ctx=c.getContext('2d',{willReadFrequently:true});
+ ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+ ctx.drawImage(bmp,left,top,sw,sh,0,0,c.width,c.height);
+
+ // One normal pass, then one high-contrast pass only if necessary.
+ let r=await ocrCanvas(c,'date-anchor',{tessedit_pageseg_mode:'7'},{text:true});
+ let d=monthFromText(r.data.text||'');
+ if(d)return {date:d,raw:r.data.text||''};
+
+ const im=ctx.getImageData(0,0,c.width,c.height),px=im.data;
+ for(let i=0;i<px.length;i+=4){
+   const rr=px[i],gg=px[i+1],bb=px[i+2];
+   const gray=.299*rr+.587*gg+.114*bb;
+   const sat=Math.max(rr,gg,bb)?(Math.max(rr,gg,bb)-Math.min(rr,gg,bb))/Math.max(rr,gg,bb):0;
+   const keep=(gray>190&&sat<.42)||(gray>225);
+   const v=keep?0:255;
+   px[i]=px[i+1]=px[i+2]=v;
  }
- return {time:null,raw:''};
+ ctx.putImageData(im,0,0);
+ r=await ocrCanvas(c,'date-anchor-mask',{tessedit_pageseg_mode:'7'},{text:true});
+ d=monthFromText(r.data.text||'');
+ return {date:d,raw:r.data.text||''};
 }
 
-async function smartFieldOCR(imageFile, fullText){
+async function targetedTimeOCRFast(bmp){
+ const W=bmp.width,H=bmp.height;
+ // The time digits sit after the eye/view-count icon. This narrow strip
+ // intentionally excludes the rest of the Telegram message.
+ const left=Math.floor(W*.45), top=Math.floor(H*.90);
+ const right=Math.floor(W*.57), bottom=Math.floor(H*.995);
+ const sw=Math.max(1,right-left),sh=Math.max(1,bottom-top);
+ const c=document.createElement('canvas');
+ c.width=Math.round(sw*7);c.height=Math.round(sh*7);
+ const ctx=c.getContext('2d',{willReadFrequently:true});
+ ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+ ctx.drawImage(bmp,left,top,sw,sh,0,0,c.width,c.height);
+
+ const im=ctx.getImageData(0,0,c.width,c.height),px=im.data;
+ // Use the actual Telegram grey text range; preserve anti-aliased edges.
+ for(let i=0;i<px.length;i+=4){
+   const rr=px[i],gg=px[i+1],bb=px[i+2];
+   const gray=.299*rr+.587*gg+.114*bb;
+   const v=gray<150?0:255;
+   px[i]=px[i+1]=px[i+2]=v;
+ }
+ ctx.putImageData(im,0,0);
+
+ const r=await ocrCanvas(c,'time-anchor',{tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789:'},{text:true});
+ const raw=r.data.text||'';
+ let time=cleanTimeCandidate(raw)||parseTimeText(raw);
+ return {time,raw};
+}
+
+async function targetedEntryOCR(bmp,words){
+ const anchor=words.find(w=>/^Entry$/i.test((w.text||'').trim()));
+ if(!anchor)return {entry:null,raw:''};
+ const W=bmp.width,H=bmp.height;
+ const left=Math.max(0,anchor.x-8), top=Math.min(H-1,anchor.y+anchor.h*.65);
+ const right=Math.min(W,left+430), bottom=Math.min(H,top+105);
+ const sw=Math.max(1,right-left),sh=Math.max(1,bottom-top);
+ const c=document.createElement('canvas');c.width=Math.round(sw*4.5);c.height=Math.round(sh*4.5);
+ const ctx=c.getContext('2d',{willReadFrequently:true});
+ ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+ ctx.drawImage(bmp,left,top,sw,sh,0,0,c.width,c.height);
+ const r=await ocrCanvas(c,'entry-anchor',{tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789.'},{text:true});
+ const raw=(r.data.text||'').replace(/,/g,'.');
+ const m=raw.match(/\b\d+\.\d{3,}\b/);
+ return {entry:m?m[0]:null,raw};
+}
+
+// SMART OCR V34:
+// 1) One full-page OCR with TSV to locate the actual signal symbol.
+// 2) Date is read relative to that symbol (works with Search/Pinned Message shifts).
+// 3) Time is read from one compact bottom-right numeric strip.
+// 4) Entry is anchored to the "Entry" label only if the full OCR parser misses it.
+// This is both faster and more deterministic than many blind full-image OCR passes.
+async function smartFieldOCR(imageFile,fullText,words){
  const bmp=await createImageBitmap(imageFile);
- let date=null,time=null,debug=[];
- // IMPORTANT: do not trust timestamps/months from the full-page OCR.
- // They are mixed with phone/UI digits. Read the two Telegram fields from
- // their own deterministic regions first.
- const d=await targetedDateOCR(bmp); date=d.date; debug.push('DATE_TARGET '+d.raw);
- const tm=await targetedTimeOCR(bmp); time=tm.time; debug.push('TIME_TARGET '+tm.raw);
- // Last-resort full OCR only if a targeted field failed.
- if(!date){date=monthFromText(fullText); if(date)debug.push('DATE_FALLBACK_FULL');}
- if(!time){time=parseTimeText(fullText); if(time)debug.push('TIME_FALLBACK_FULL');}
- return {date,time,debug};
+ const debug=[];
+ const symbolBox=symbolFromWords(words);
+ let date=null,time=null,entry=null;
+
+ const d=await targetedDateFromSymbol(bmp,symbolBox);
+ date=d.date;debug.push('DATE_ANCHOR '+(d.raw||'-'));
+
+ const tm=await targetedTimeOCRFast(bmp);
+ time=tm.time;debug.push('TIME_ANCHOR '+(tm.raw||'-'));
+
+ if(!entry){
+   const eo=await targetedEntryOCR(bmp,words);
+   entry=eo.entry;debug.push('ENTRY_ANCHOR '+(eo.raw||'-'));
+ }
+ if(!date){date=monthFromText(fullText);if(date)debug.push('DATE_FULL_FALLBACK');}
+ if(!time){time=parseTimeText(fullText);if(time)debug.push('TIME_FULL_FALLBACK');}
+ return {date,time,entry,debug,symbolBox};
 }
 
 function monthNum(name){return new Date(Date.parse(name+' 1, 2000')).getMonth()+1}
@@ -381,9 +458,14 @@ async function runOCR(){
   const maxW=1500,scale=Math.min(1,maxW/Math.max(1,W));
   const c=document.createElement('canvas'); c.width=Math.max(1,Math.round(W*scale)); c.height=Math.max(1,Math.round(H*scale));
   const ctx=c.getContext('2d',{willReadFrequently:true});ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.drawImage(bmp,0,0,c.width,c.height);
-  const r=await ocrCanvas(c,'อ่านข้อความ Signal',{tessedit_pageseg_mode:'11'});
-  ocrText=r.data.text||''; $('ocrRaw').textContent=ocrText; extracted=parseOCR(ocrText);
-  const fields=await smartFieldOCR(imageFile,ocrText);
+  const r=await ocrCanvas(c,'อ่านข้อความ Signal',{tessedit_pageseg_mode:'11'},{text:true,tsv:true});
+  ocrText=r.data.text||''; $('ocrRaw').textContent=ocrText;
+  extracted=parseOCR(ocrText);
+  const words=parseTSV(r.data.tsv||'');
+  // Prefer symbol/entry values derived from structured word locations when possible.
+  const sb=symbolFromWords(words);
+  if(sb) extracted.symbol=sb.symbol;
+  const fields=await smartFieldOCR(imageFile,ocrText,words);
   const year=new Date().getFullYear();
   if(fields.date){
     const mm=String(monthNum(fields.date.month)).padStart(2,'0'),dd=String(fields.date.day).padStart(2,'0');
@@ -393,7 +475,8 @@ async function runOCR(){
   if(extracted.symbol)$('symbol').value=extracted.symbol.toUpperCase();
   if(extracted.position)$('position').value=/short/i.test(extracted.position)?'Short':'Long';
   if(extracted.lev)$('lev').value=extracted.lev;
-  if(extracted.entry)$('entry').value=extracted.entry;
+  if(fields.entry)$('entry').value=fields.entry;
+  else if(extracted.entry)$('entry').value=extracted.entry;
   if(fields.debug?.length) $('ocrRaw').textContent += '\n\n[SMART FIELDS]\n'+fields.debug.join('\n');
   renderMeta();
   const missing=[];
