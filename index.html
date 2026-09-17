@@ -176,7 +176,11 @@ function parseOCR(t){
    ||(s.match(/\b(?:Cross|Isolated)\s*\(?\s*(\d{1,3})\s*[xX]?\s*\)?/i)||[])[1];
  let entry;
  const em=s.match(/Entry\s+Targets?[^\d]{0,120}(\d+\.\d{3,})/i); if(em)entry=em[1];
- const tm=s.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+ let tm=s.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+ if(!tm){
+   const compact=s.match(/(?:^|[^0-9])(?:[0-9]\s*)?([01]\d|2[0-3])[:.]([0-5]\d)(?!\d)/);
+   if(compact) tm=[compact[0],compact[1],compact[2]];
+ }
  const md=monthFromText(s);
  return {symbol,position,lev,entry,time:tm?tm[0]:null,month:md?md.month:null,day:md?md.day:null};
 }
@@ -247,7 +251,11 @@ async function runOCR(){
    extracted=parseOCR(ocrText);
    // V15: dedicated Telegram timestamp scan; never use the phone status-bar clock.
    const telegramTime=await detectTelegramTime(imageFile);
-   if(telegramTime) extracted.time=telegramTime;
+   // Keep a valid OCR time if the dedicated crop accidentally sees a false 00:00.
+   // Telegram's actual timestamp is the small time at the lower-right of the message bubble.
+   if(telegramTime && telegramTime !== '00:00') extracted.time=telegramTime;
+   // If the dedicated detector returns midnight, trust the main OCR result instead.
+   if((!extracted.time || extracted.time==='00:00') && telegramTime && telegramTime!=='00:00') extracted.time=telegramTime;
    const detectedDate=monthFromText(dateOCR)||monthFromText(ocrText);
    const year=new Date().getFullYear();
    if(detectedDate){
@@ -295,6 +303,9 @@ async function fetchKlines(symbol,startTime,endTime){
   for(const base of bases){
     const url=`${base}/openApi/swap/v3/quote/klines?${qs}`;
     const attempts=[
+      {url:`https://everyorigin.jwvbremen.nl/get?url=${encodeURIComponent(url)}`, opts:{method:'GET',cache:'no-store'}},
+      {url:`https://api.cors.syrins.tech/?url=${encodeURIComponent(url)}`, opts:{method:'GET',cache:'no-store'}},
+      {url:`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`, opts:{method:'GET',cache:'no-store'}},
       {url:`https://api.cors.lol/?url=${encodeURIComponent(url)}`, opts:{method:'GET',cache:'no-store'}},
       {url:`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, opts:{method:'GET',cache:'no-store'}},
       {url, opts:{method:'GET',mode:'cors',cache:'no-store',headers:{'X-SOURCE-KEY':'BX-AI-SKILL'}}},
@@ -312,7 +323,7 @@ async function fetchKlines(symbol,startTime,endTime){
       }catch(e){lastErr=e;}
     }
   }
-  throw new Error('BingX: iPhone ถูกบล็อกการเชื่อมต่อโดยตรง (CORS) และ CORS relay ไม่ตอบสนอง: '+(lastErr?.message||'network error'));
+  throw new Error('BingX: เบราว์เซอร์บล็อกการเรียก API โดยตรง และ public CORS relays ที่ลองทั้งหมดไม่ตอบสนอง: '+(lastErr?.message||'network error'));
 }
 
 async function calculate(){
