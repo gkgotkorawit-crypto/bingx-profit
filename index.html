@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BingX Profit Calculator V31 GITHUB</title>
+<title>BingX Profit Calculator V32 SMART OCR</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0b1118">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -169,127 +169,167 @@ function fuzzyMonthFromText(t){
 }
 function monthFromText(t){ return fuzzyMonthFromText(t); }
 function parseOCR(t){
- const s=t.replace(/\r/g,'\n');
+ const s=(t||'').replace(/\r/g,'\n');
  const symbol=(s.match(/#?\s*([A-Z]{2,12})\s*[/\\|JIl1]\s*(?:USDT|USD)/i)||[])[1];
  const position=(s.match(/\b(Long|Short)\b/i)||[])[1];
  const lev=(s.match(/Leverage[^\n]{0,80}?\(?\s*(\d{1,3})\s*[xX]\s*\)?/i)||[])[1]
    ||(s.match(/\b(?:Cross|Isolated)\s*\(?\s*(\d{1,3})\s*[xX]?\s*\)?/i)||[])[1];
  let entry;
  const em=s.match(/Entry\s+Targets?[^\d]{0,120}(\d+\.\d{3,})/i); if(em)entry=em[1];
- let tm=null;
- const timeHits=[...s.matchAll(/\b([01]?\d|2[0-3])\s*[:.]\s*([0-5]\d)\b/g)];
- for(const m of timeHits){ const hh=Number(m[1]),mm=Number(m[2]); if(!(hh===0&&mm===0)) tm=m; }
- if(!tm){
-   const compactHits=[...s.matchAll(/(?:^|[^0-9])(?:[0-9]\s*)?([01]\d|2[0-3])[:.]([0-5]\d)(?!\d)/g)];
-   for(const m of compactHits){ const hh=Number(m[1]),mm=Number(m[2]); if(!(hh===0&&mm===0)) tm=m; }
+ return {symbol,position,lev,entry};
+}
+
+function parseTimeText(t){
+ let s=(t||'').replace(/[OoQ]/g,'0').replace(/[IlL]/g,'1').replace(/[;,\.]/g,':');
+ // OCR can attach unrelated UI digits to the timestamp: 621:04 / 811:45 / 8509:35.
+ // Keep the final two digits before the colon as the hour.
+ const hits=[...s.matchAll(/(?:^|[^0-9])(\d{1,4})\s*:\s*([0-5]\d)(?!\d)/g)];
+ const vals=[];
+ for(const m of hits){
+   let h=m[1]; if(h.length>2)h=h.slice(-2);
+   const hh=Number(h),mm=Number(m[2]);
+   if(hh<=23 && !(hh===0&&mm===0)) vals.push(`${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`);
  }
- const md=monthFromText(s);
- return {symbol,position,lev,entry,time:tm?tm[0]:null,month:md?md.month:null,day:md?md.day:null};
+ return vals.length?vals[vals.length-1]:null;
+}
+
+function parseTSV(tsv){
+ const lines=(tsv||'').split(/\r?\n/).filter(Boolean); if(lines.length<2)return [];
+ const head=lines[0].split('\t'); const idx={}; head.forEach((h,i)=>idx[h]=i);
+ const out=[];
+ for(let i=1;i<lines.length;i++){
+  const a=lines[i].split('\t'); if(a.length<head.length)continue;
+  const text=(a[idx.text]||'').trim(); if(!text)continue;
+  out.push({text,x:Number(a[idx.left]||0),y:Number(a[idx.top]||0),w:Number(a[idx.width]||0),h:Number(a[idx.height]||0),conf:Number(a[idx.conf]||0)});
+ }
+ return out;
+}
+
+function bestTimeFromWords(words){
+ const hits=[];
+ for(const w of words){
+   const t=parseTimeText(w.text);
+   if(t)hits.push({t,x:w.x,y:w.y,conf:w.conf});
+ }
+ if(!hits.length)return null;
+ hits.sort((a,b)=>(b.y-a.y)||((b.x+a.x)-(a.x+b.x))||(b.conf-a.conf));
+ return hits[0].t;
+}
+
+function normalizeDateText(t){
+ return (t||'').replace(/\u00a0/g,' ').replace(/[|]/g,'I').replace(/\n+/g,' ');
+}
+function fuzzyMonthFromText(t){
+ const raw=normalizeDateText(t);
+ const months=['January','February','March','April','May','June','July','August','September','October','November','December'];
+ for(const name of months){
+   const m=raw.match(new RegExp('\\b'+name+'\\s*([0-9]{1,2})\\b','i'));
+   if(m)return {month:name,day:Number(m[1])};
+ }
+ const tokens=[...raw.matchAll(/[A-Za-z]{1,20}|[0-9]{1,2}/g)].map(x=>({v:x[0],i:x.index}));
+ for(let i=0;i<tokens.length;i++){
+   if(!/^[A-Za-z]/.test(tokens[i].v))continue;
+   for(let span=1;span<=3 && i+span-1<tokens.length;span++){
+     const joined=tokens.slice(i,i+span).filter(x=>/^[A-Za-z]/.test(x.v)).map(x=>x.v).join('').toLowerCase();
+     if(!joined)continue;
+     for(const name of months){
+       const target=name.toLowerCase(), maxErr=target.length>=8?3:2;
+       if(Math.abs(joined.length-target.length)>3)continue;
+       if(levenshtein(joined,target)<=maxErr){
+         const after=tokens.slice(i+span,i+span+5).find(x=>/^[0-9]{1,2}$/.test(x.v));
+         if(after){const day=Number(after.v);if(day>=1&&day<=31)return {month:name,day};}
+       }
+     }
+   }
+ }
+ const m=raw.match(/(?:S[e3][pP][t7]?(?:e|c|a)?m(?:b|e|r)?|Sept(?:ember)?|Sep)[^0-9]{0,16}([0-9]{1,2})/i);
+ if(m){const day=Number(m[1]);if(day>=1&&day<=31)return {month:'September',day};}
+ return null;
+}
+function monthFromText(t){return fuzzyMonthFromText(t)}
+
+function cropCanvas(bmp, rx, ry, rw, rh, scale){
+ const W=bmp.width,H=bmp.height;
+ const sx=Math.max(0,Math.floor(W*rx)),sy=Math.max(0,Math.floor(H*ry));
+ const sw=Math.min(W-sx,Math.max(1,Math.floor(W*rw))),sh=Math.min(H-sy,Math.max(1,Math.floor(H*rh)));
+ const c=document.createElement('canvas'); c.width=Math.max(1,Math.round(sw*scale)); c.height=Math.max(1,Math.round(sh*scale));
+ const ctx=c.getContext('2d',{willReadFrequently:true}); ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
+ ctx.drawImage(bmp,sx,sy,sw,sh,0,0,c.width,c.height);
+ return {c,ctx,sx,sy,sw,sh};
+}
+function enhanceForText(c, mode){
+ const ctx=c.getContext('2d',{willReadFrequently:true}); const im=ctx.getImageData(0,0,c.width,c.height),d=im.data;
+ for(let i=0;i<d.length;i+=4){
+   const r=d[i],g=d[i+1],b=d[i+2],mx=Math.max(r,g,b),mn=Math.min(r,g,b),sat=mx?((mx-mn)/mx):0;
+   const gray=0.299*r+0.587*g+0.114*b;
+   let keep;
+   if(mode==='date') keep=(gray>205)||(gray>165&&sat<0.24);
+   else keep=(gray>120&&sat<0.24)||(gray>170&&sat<0.36);
+   const v=keep?255:0; d[i]=d[i+1]=d[i+2]=v;
+ }
+ ctx.putImageData(im,0,0);
+ return c;
+}
+
+// SMART OCR: one full-page pass + two deterministic field passes only when needed.
+// Date and time are treated as separate fields, not guessed from unrelated UI text.
+async function smartFieldOCR(imageFile, fullText){
+ const bmp=await createImageBitmap(imageFile), W=bmp.width,H=bmp.height;
+ let date=monthFromText(fullText), time=parseTimeText(fullText), debug=[];
+ // DATE: Telegram's pill sits around x=30–70%. Its y-position changes when a
+ // search/pinned banner exists, so use two narrow bands instead of one huge crop.
+ if(!date){
+   const bands=[[0.055,0.18],[0.16,0.31]];
+   for(let i=0;i<bands.length && !date;i++){
+     const [y1,y2]=bands[i];
+     const q=cropCanvas(bmp,0.30,y1,0.40,y2-y1,7);
+     const r=await ocrCanvas(q.c,'date-band-'+i,{tessedit_pageseg_mode:'11'});
+     debug.push('DATE'+(i+1)+' '+(r.data.text||''));
+     date=monthFromText(r.data.text||'');
+   }
+ }
+ // TIME: the Telegram timestamp is always in the lower part of the message.
+ // Search a broad lower region, then normalize OCR strings such as 621:04.
+ if(!time){
+   const q=cropCanvas(bmp,0.18,0.62,0.70,0.34,5.5);
+   let r=await ocrCanvas(q.c,'time',{tessedit_pageseg_mode:'11',tessedit_char_whitelist:'0123456789:'});
+   time=parseTimeText(r.data.text||'');
+   if(!time){
+     const q2=cropCanvas(bmp,0.05,0.70,0.90,0.25,6);
+     r=await ocrCanvas(q2.c,'time2',{tessedit_pageseg_mode:'11',tessedit_char_whitelist:'0123456789:'});
+     time=parseTimeText(r.data.text||'');
+   }
+   debug.push('TIME '+(r.data.text||''));
+ }
+ return {date,time,debug};
 }
 
 function monthNum(name){return new Date(Date.parse(name+' 1, 2000')).getMonth()+1}
 
-// V24: one small, deterministic timestamp crop. No multi-threshold scanning.
-async function detectTelegramTime(imageFile){
- const bmp=await createImageBitmap(imageFile),W=bmp.width,H=bmp.height;
- // Tight crop: Telegram message timestamp is at the bottom-right edge of the
- // white message bubble. Keeping the crop narrow prevents OCR from inventing
- // a time from other text/UI elements.
- const sx=Math.floor(W*0.47), sy=Math.floor(H*0.875), sw=Math.floor(W*0.19), sh=Math.floor(H*0.10);
- const c=document.createElement('canvas');
- const scale=Math.min(8,Math.max(5,1000/Math.max(1,sw)));
- c.width=Math.round(sw*scale); c.height=Math.round(sh*scale);
- const ctx=c.getContext('2d');ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
- ctx.drawImage(bmp,sx,sy,sw,sh,0,0,c.width,c.height);
- const im=ctx.getImageData(0,0,c.width,c.height),d=im.data;
- // Keep pale/gray timestamp pixels; suppress the green Telegram background.
- for(let i=0;i<d.length;i+=4){
-   const r=d[i],g=d[i+1],b=d[i+2],mx=Math.max(r,g,b),mn=Math.min(r,g,b);
-   const sat=mx?((mx-mn)/mx):1,gray=0.299*r+0.587*g+0.114*b;
-   const keep=(gray>105 && sat<0.18) || (gray>145 && sat<0.30);
-   const v=keep?255:0;d[i]=d[i+1]=d[i+2]=v;
- }
- ctx.putImageData(im,0,0);
- try{
-   const r=await ocrCanvas(c,'เวลา Telegram',{tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789:'});
-   const txt=(r.data.text||'').replace(/[OoQ]/g,'0').replace(/[IlL]/g,'1').replace(/[;,.]/g,':');
-   const hits=[...txt.matchAll(/(?:^|[^0-9])([01]?\d|2[0-3])\s*:\s*([0-5]\d)(?!\d)/g)];
-   for(const m of hits){
-     const hh=Number(m[1]),mm=Number(m[2]);
-     if(hh===0&&mm===0) continue;
-     return `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
-   }
- }catch(e){}
- return null;
-}
-async function detectTelegramDateFast(imageFile){
- const bmp=await createImageBitmap(imageFile),W=bmp.width,H=bmp.height;
- // Telegram's date separator is normally in the upper 5–22% of the Signal image.
- // Use one broad crop so small layout differences do not break detection.
- const sx=Math.floor(W*0.18), sy=Math.floor(H*0.045), sw=Math.floor(W*0.68), sh=Math.floor(H*0.20);
- const c=document.createElement('canvas');
- const scale=Math.min(4.8,Math.max(3.0,1100/Math.max(1,sw)));
- c.width=Math.round(sw*scale); c.height=Math.round(sh*scale);
- const ctx=c.getContext('2d');ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
- ctx.drawImage(bmp,sx,sy,sw,sh,0,0,c.width,c.height);
- try{
-   // Pass 1: preserve the original pixels. This is often enough and avoids
-   // destroying the anti-aliased white date text.
-   let r=await ocrCanvas(c,'วันที่ Telegram',{tessedit_pageseg_mode:'11'});
-   let d1=fuzzyMonthFromText(r.data.text||'');
-   if(d1)return d1;
-
-   // Pass 2 only when necessary: high-contrast image, optimized for the pale
-   // Telegram date badge. Tesseract supports recognizing a specific region and
-   // upscaling improves recognition on small text. See Tesseract.js docs.
-   const im=ctx.getImageData(0,0,c.width,c.height),d=im.data;
-   for(let i=0;i<d.length;i+=4){
-     const r=d[i],g=d[i+1],b=d[i+2],gray=0.299*r+0.587*g+0.114*b;
-     const mx=Math.max(r,g,b),mn=Math.min(r,g,b),sat=mx?((mx-mn)/mx):0;
-     const keep=(gray>=220)||(gray>=185&&sat<0.28);
-     const v=keep?255:0; d[i]=d[i+1]=d[i+2]=v;
-   }
-   ctx.putImageData(im,0,0);
-   r=await ocrCanvas(c,'วันที่ Telegram contrast',{tessedit_pageseg_mode:'7'});
-   d1=fuzzyMonthFromText(r.data.text||'');
-   if(d1)return d1;
- }catch(e){}
- return null;
-}
 
 async function runOCR(){
  if(!imageFile){setStatus('กรุณาเลือกรูปก่อน','error');return}
- $('ocrStatus').textContent='กำลังอ่านภาพแบบเร็ว...';
- // Never carry an old OCR time/symbol/entry into a new image.
+ $('ocrStatus').textContent='กำลังสแกนแบบ Smart OCR — แยกวันที่/เวลา/Symbol/Entry...';
  ['date','entryTime','symbol','entry'].forEach(id=>$(id).value='');
  try{
   const bmp=await createImageBitmap(imageFile),W=bmp.width,H=bmp.height;
-  const maxW=1200, scale=Math.min(1, maxW/Math.max(1,W));
-  const c=document.createElement('canvas');
-  c.width=Math.max(1,Math.round(W*scale)); c.height=Math.max(1,Math.round(H*scale));
-  const ctx=c.getContext('2d');ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='medium';
-  ctx.drawImage(bmp,0,0,c.width,c.height);
+  const maxW=1500,scale=Math.min(1,maxW/Math.max(1,W));
+  const c=document.createElement('canvas'); c.width=Math.max(1,Math.round(W*scale)); c.height=Math.max(1,Math.round(H*scale));
+  const ctx=c.getContext('2d',{willReadFrequently:true});ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.drawImage(bmp,0,0,c.width,c.height);
   const r=await ocrCanvas(c,'อ่านข้อความ Signal',{tessedit_pageseg_mode:'11'});
   ocrText=r.data.text||''; $('ocrRaw').textContent=ocrText; extracted=parseOCR(ocrText);
-
-  // IMPORTANT: the full-page OCR can confuse the iPhone status-bar time or
-  // previous UI text with Telegram's message time. The dedicated timestamp
-  // crop is therefore authoritative and always runs for every new image.
-  const detectedTime=await detectTelegramTime(imageFile);
-  if(detectedTime) extracted.time=detectedTime;
-
-  let detectedDate=monthFromText(ocrText);
-  if(!detectedDate) detectedDate=await detectTelegramDateFast(imageFile);
+  const fields=await smartFieldOCR(imageFile,ocrText);
   const year=new Date().getFullYear();
-  if(detectedDate){
-   const mm=String(monthNum(detectedDate.month)).padStart(2,'0'),dd=String(detectedDate.day).padStart(2,'0');
-   $('date').value=`${year}-${mm}-${dd}`;
+  if(fields.date){
+    const mm=String(monthNum(fields.date.month)).padStart(2,'0'),dd=String(fields.date.day).padStart(2,'0');
+    $('date').value=`${year}-${mm}-${dd}`;
   }
-  if(extracted.time)$('entryTime').value=extracted.time;
+  if(fields.time)$('entryTime').value=fields.time;
   if(extracted.symbol)$('symbol').value=extracted.symbol.toUpperCase();
   if(extracted.position)$('position').value=/short/i.test(extracted.position)?'Short':'Long';
   if(extracted.lev)$('lev').value=extracted.lev;
   if(extracted.entry)$('entry').value=extracted.entry;
+  if(fields.debug?.length) $('ocrRaw').textContent += '\n\n[SMART FIELDS]\n'+fields.debug.join('\n');
   renderMeta();
   const missing=[];
   if(!$('date').value)missing.push('วันที่');
@@ -297,7 +337,7 @@ async function runOCR(){
   if(!$('symbol').value)missing.push('Symbol');
   if(!$('entry').value)missing.push('Entry Price');
   if(missing.length) $('ocrStatus').innerHTML='<span class="warn">⚠ อ่านได้บางส่วน — ยังขาด: '+missing.join(', ')+'</span>';
-  else $('ocrStatus').innerHTML='<span class="ok">✓ อ่านสำเร็จ: '+$('date').value+' '+$('entryTime').value+' | '+$('symbol').value+' | '+$('position').value+' | '+$('lev').value+'x | Entry '+$('entry').value+'</span>';
+  else $('ocrStatus').innerHTML='<span class="ok">✓ Smart OCR สำเร็จ: '+$('date').value+' '+$('entryTime').value+' | '+$('symbol').value+' | '+$('position').value+' | '+$('lev').value+'x | Entry '+$('entry').value+'</span>';
  }catch(e){console.error(e);$('ocrStatus').innerHTML='<span class="error">OCR error: '+(e?.message||e)+'</span>'}
 }
 function renderMeta(){
@@ -308,26 +348,44 @@ function renderMeta(){
 ['date','entryTime','symbol','position','lev','entry'].forEach(id=>$(id).addEventListener('input',renderMeta));
 const savedProxy=localStorage.getItem('bingx_proxy_url')||''; if($('proxyUrl')){$('proxyUrl').value=savedProxy;$('proxyUrl').addEventListener('change',()=>{const v=$('proxyUrl').value.trim();if(v)localStorage.setItem('bingx_proxy_url',v);else localStorage.removeItem('bingx_proxy_url');});}
 
+async function fetchJSON(url, timeoutMs=12000, headers={}){
+ const ac=new AbortController(); const timer=setTimeout(()=>ac.abort(),timeoutMs);
+ try{
+   const r=await fetch(url,{method:'GET',mode:'cors',cache:'no-store',signal:ac.signal,headers});
+   if(!r.ok)throw new Error('HTTP '+r.status);
+   const text=await r.text();
+   let j; try{j=JSON.parse(text)}catch(e){
+     const a=text.indexOf('{'),b=text.lastIndexOf('}'); if(a>=0&&b>a)j=JSON.parse(text.slice(a,b+1)); else throw new Error('Invalid JSON');
+   }
+   return j;
+ }finally{clearTimeout(timer)}
+}
+function normalizeKlineJSON(j){
+ if(!j||Number(j.code)!==0) throw new Error(j?.msg||('BingX code '+(j?.code??'unknown')));
+ const arr=Array.isArray(j.data)?j.data:[];
+ return arr.map(x=>Array.isArray(x)?({t:Number(x[0]),o:Number(x[1]),h:Number(x[2]),l:Number(x[3]),c:Number(x[4])}):({t:Number(x.time??x.openTime),o:Number(x.open),h:Number(x.high),l:Number(x.low),c:Number(x.close)})).filter(x=>Number.isFinite(x.t));
+}
 async function fetchKlines(symbol,startTime,endTime){
-  // GitHub Pages version: call BingX directly. Do NOT add custom headers,
-  // because X-SOURCE-KEY triggers a browser preflight and can cause CORS
-  // failure on iPhone Safari. The request remains a simple GET.
-  const qs=`symbol=${encodeURIComponent(symbol)}&startTime=${startTime}&endTime=${endTime}&interval=1m&limit=1440&timestamp=${Date.now()}`;
-  const bases=['https://open-api.bingx.com','https://open-api.bingx.pro'];
-  let lastErr=null;
-  for(const base of bases){
-    const url=`${base}/openApi/swap/v3/quote/klines?${qs}`;
-    try{
-      const r=await fetch(url,{method:'GET',mode:'cors',cache:'no-store'});
-      if(!r.ok) throw new Error(`HTTP ${r.status}`);
-      const j=await r.json();
-      if(Number(j.code)!==0) throw new Error(j.msg||`BingX code ${j.code}`);
-      const data=(j.data||[]).map(x=>Array.isArray(x)?({t:x[0],o:x[1],h:x[2],l:x[3],c:x[4]}):({t:x.time??x.openTime,o:x.open,h:x.high,l:x.low,c:x.close}));
-      if(data.length) return {ok:true,data};
-      throw new Error('BingX returned no kline data');
-    }catch(e){lastErr=e;}
-  }
-  throw new Error('เชื่อมต่อ BingX จาก GitHub Pages ไม่สำเร็จ: '+(lastErr?.message||'Load failed'));
+ const qs=`symbol=${encodeURIComponent(symbol)}&startTime=${startTime}&endTime=${endTime}&interval=1m&limit=1440&timestamp=${Date.now()}`;
+ const origin=`https://open-api.bingx.com/openApi/swap/v3/quote/klines?${qs}`;
+ const origin2=`https://open-api.bingx.pro/openApi/swap/v3/quote/klines?${qs}`;
+ const candidates=[
+   {name:'BingX',url:origin,headers:{'X-SOURCE-KEY':'BX-AI-SKILL'}},
+   {name:'BingX PRO',url:origin2,headers:{'X-SOURCE-KEY':'BX-AI-SKILL'}},
+   {name:'AllOrigins',url:'https://api.allorigins.win/raw?url='+encodeURIComponent(origin)},
+   {name:'CorsProxy',url:'https://corsproxy.io/?url='+encodeURIComponent(origin)},
+   {name:'Jina',url:'https://r.jina.ai/'+origin}
+ ];
+ let lastErr=null;
+ for(const item of candidates){
+   try{
+     const j=await fetchJSON(item.url,12000,item.headers||{});
+     const data=normalizeKlineJSON(j);
+     if(data.length)return {ok:true,data,source:item.name};
+     throw new Error('ไม่มี K-line');
+   }catch(e){lastErr=e;}
+ }
+ throw new Error('เชื่อมต่อข้อมูล BingX ไม่สำเร็จจาก GitHub Pages: '+(lastErr?.message||'Load failed'));
 }
 async function calculate(){
  const date=$('date').value,time=$('entryTime').value,symbol=$('symbol').value.trim().toUpperCase().replace(/[-_\\s]?USDT$/,'')+'-USDT';
@@ -344,12 +402,14 @@ async function calculate(){
    // Search forward in 24-hour chunks until the first touch is found.
    const allCandles=[];
    let chunkStart=entryTs;
+   let sourceName='';
    let found=null;
    const maxChunks=7; // search up to 7 days after entry
    for(let i=0;i<maxChunks;i++){
      const chunkEnd=chunkStart + 1440*60*1000;
      setStatus(`กำลังค้นหา K-line ช่วงที่ ${i+1}/${maxChunks}...`);
      const j=await fetchKlines(symbol,chunkStart,chunkEnd);
+     sourceName=j.source||sourceName;
      const chunk=j.data.map(x=>({t:Number(x.t),o:Number(x.o),h:Number(x.h),l:Number(x.l),c:Number(x.c)}))
        .filter(x=>Number.isFinite(x.t))
        .sort((a,b)=>a.t-b.t);
@@ -379,7 +439,7 @@ async function calculate(){
    const touchText=lastHit?formatTouchDateTime(lastHit.t):'ไม่พบ';
    $('lastTouch').textContent=touchText;
    $('lastDur').textContent=lastHit?duration(lastHit.t-entryTs):'-';
-   $('dataInfo').textContent=`${candles.length} x 1m${lastHit?' — ค้นพบภายในช่วงค้นหา':' — ค้นหาสูงสุด 7 วัน'} `;
+   $('dataInfo').textContent=`${candles.length} x 1m | ${sourceName||'BingX'}${lastHit?' — พบ First Touch':' — ค้นหาสูงสุด 7 วัน'}`;
    $('out').style.display='block';
 
    // Fixed Profit Card editing prompt requested by the user. Only the values
