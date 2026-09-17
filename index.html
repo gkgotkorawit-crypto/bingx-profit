@@ -181,6 +181,38 @@ function parseOCR(t){
  return {symbol,position,lev,entry,time:tm?tm[0]:null,month:md?md.month:null,day:md?md.day:null};
 }
 function monthNum(name){return new Date(Date.parse(name+' 1, 2000')).getMonth()+1}
+
+// V15: dedicated Telegram message timestamp detector.
+// Reads the timestamp inside the Telegram message bubble, not the phone clock.
+async function detectTelegramTime(imageFile){
+ const bmp=await createImageBitmap(imageFile), W=bmp.width, H=bmp.height;
+ const boxes=[[.58,.62,.40,.34],[.48,.68,.50,.28],[.68,.70,.30,.25],[.35,.55,.65,.40]];
+ const found=[];
+ for(let i=0;i<boxes.length;i++){
+  const [fx,fy,fw,fh]=boxes[i], sx=Math.max(0,Math.floor(W*fx)), sy=Math.max(0,Math.floor(H*fy));
+  const sw=Math.min(W-sx,Math.floor(W*fw)), sh=Math.min(H-sy,Math.floor(H*fh));
+  if(sw<20||sh<20)continue;
+  const c=document.createElement('canvas'), scale=Math.min(3,Math.max(1.5,900/sw));
+  c.width=Math.floor(sw*scale); c.height=Math.floor(sh*scale);
+  c.getContext('2d').drawImage(bmp,sx,sy,sw,sh,0,0,c.width,c.height);
+  const ctx=c.getContext('2d'), im=ctx.getImageData(0,0,c.width,c.height), d=im.data;
+  for(let p=0;p<d.length;p+=4){
+   const v=.299*d[p]+.587*d[p+1]+.114*d[p+2], q=v>155?255:(v<105?0:Math.round(v));
+   d[p]=d[p+1]=d[p+2]=q;
+  }
+  ctx.putImageData(im,0,0);
+  try{
+   const r=await ocrCanvas(c,`เวลา Telegram ${i+1}/4`,{tessedit_pageseg_mode:'11',tessedit_char_whitelist:'0123456789:'});
+   const txt=(r.data.text||'').replace(/[Oo]/g,'0').replace(/[Il|]/g,'1');
+   for(const m of txt.matchAll(/\b([01]?\d|2[0-3])\s*[:.]\s*([0-5]\d)\b/g))
+    found.push(`${String(m[1]).padStart(2,'0')}:${m[2]}`);
+  }catch(e){}
+ }
+ if(!found.length)return null;
+ const counts={}; for(const x of found)counts[x]=(counts[x]||0)+1;
+ return found.slice().sort((a,b)=>(counts[b]-counts[a]))[0];
+}
+
 async function runOCR(){
  if(!imageFile){setStatus('กรุณาเลือกรูปก่อน','error');return}
  $('ocrStatus').textContent='กำลังเตรียมภาพสำหรับ OCR...';
@@ -217,6 +249,9 @@ async function runOCR(){
    ocrText=[t1,t2,dateOCR].filter(Boolean).join('\n');
    $('ocrRaw').textContent=ocrText;
    extracted=parseOCR(ocrText);
+   // V15: dedicated Telegram timestamp scan; never use the phone status-bar clock.
+   const telegramTime=await detectTelegramTime(imageFile);
+   if(telegramTime) extracted.time=telegramTime;
    const detectedDate=monthFromText(dateOCR)||monthFromText(ocrText);
    const year=new Date().getFullYear();
    if(detectedDate){
