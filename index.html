@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BingX Profit Calculator V46 iOS OCR</title>
+<title>BingX Profit Calculator V47 FAST OCR</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0b1118">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -33,7 +33,7 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 <body>
 <div class="wrap">
 <div class="card">
-<h1>⚡ BingX Profit Calculator <span style="font-size:11px;color:#20d19b;border:1px solid #20d19b;border-radius:999px;padding:3px 7px;vertical-align:middle">V46 iOS OCR</span></h1>
+<h1>⚡ BingX Profit Calculator <span style="font-size:11px;color:#20d19b;border:1px solid #20d19b;border-radius:999px;padding:3px 7px;vertical-align:middle">V47 FAST OCR</span></h1>
 <div class="sub">📱 iPhone / iPad — เพิ่มลงหน้าจอหลักจาก Safari ได้<br>อัปโหลดภาพ Signal → ระบบ OCR ข้อมูลในภาพ → คุณกรอกเฉพาะ LAST PRICE → ระบบค้นหาเวลาแตะราคาแรกหลังเข้าออเดอร์ และคำนวณระยะเวลา</div>
 </div>
 
@@ -147,272 +147,133 @@ function levenshtein(a,b){
  let p=Array(n+1);for(let j=0;j<=n;j++)p[j]=j;
  for(let i=1;i<=m;i++){let q=[i];for(let j=1;j<=n;j++)q[j]=Math.min(q[j-1]+1,p[j]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p=q;}return p[n];
 }
-function normalizeDateText(t){return (t||'').replace(/\u00a0/g,' ').replace(/[|]/g,'I').replace(/\n+/g,' ')}
-function fuzzyMonthFromText(t){
- const raw=normalizeDateText(t),months=['January','February','March','April','May','June','July','August','September','October','November','December'];
- for(const name of months){const m=raw.match(new RegExp('\\b'+name+'\\s*([0-9]{1,2})\\b','i'));if(m)return {month:name,day:Number(m[1])}}
- const tokens=[...raw.matchAll(/[A-Za-z]{1,20}|[0-9]{1,2}/g)].map(x=>({v:x[0],i:x.index}));
- for(let i=0;i<tokens.length;i++){
-  if(!/^[A-Za-z]/.test(tokens[i].v))continue;
-  for(let span=1;span<=3&&i+span-1<tokens.length;span++){
-   const joined=tokens.slice(i,i+span).filter(x=>/^[A-Za-z]/.test(x.v)).map(x=>x.v).join('').toLowerCase();
-   for(const name of months){const target=name.toLowerCase(),maxErr=target.length>=8?3:2;if(Math.abs(joined.length-target.length)<=3&&levenshtein(joined,target)<=maxErr){const a=tokens[i+span];if(a&&/^\d{1,2}$/.test(a.v)){const day=Number(a.v);if(day>=1&&day<=31)return {month:name,day}}}}
-  }
- }
- const m=raw.match(/(?:S[e3][pP][t7]?(?:e|c|a)?m(?:b|e|r)?|Sept(?:ember)?|Sep)[^0-9]{0,16}([0-9]{1,2})/i);
- if(m){const day=Number(m[1]);if(day>=1&&day<=31)return {month:'September',day}}
- return null;
-}
+function compact(s){return String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'')}
+function normalizeText(s){return String(s||'').replace(/\u00a0/g,' ').replace(/\r/g,'\n')}
 function monthNum(name){
-  const months={january:1,february:2,march:3,april:4,may:5,june:6,july:7,august:8,september:9,october:10,november:11,december:12};
-  const key=String(name||'').trim().toLowerCase();
-  if(months[key]) return months[key];
-  // tolerate common OCR abbreviations / misspellings
-  const ab={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12};
-  if(ab[key]) return ab[key];
-  const names=Object.keys(months);
-  let best=null,bestD=99;
-  for(const n of names){const d=levenshtein(key,n);if(d<bestD){bestD=d;best=months[n]}}
-  return bestD<=3?best:null;
-}
-function monthFromText(t){return fuzzyMonthFromText(t)}
-function parseOCR(t){
- const s=(t||'').replace(/\r/g,'\n');
- const symbol=(s.match(/#?\s*([A-Z]{2,12})\s*[/\\|JIl1]\s*(?:USDT|USD)/i)||[])[1];
- const position=(s.match(/\b(Long|Short)\b/i)||[])[1];
- const lev=(s.match(/Leverage[^\n]{0,80}?\(?\s*(\d{1,3})\s*[xX]\s*\)?/i)||[])[1]||(s.match(/\b(?:Cross|Isolated)\s*\(?\s*(\d{1,3})\s*[xX]?\s*\)?/i)||[])[1];
- const em=s.match(/Entry\s+Targets?[^\d]{0,120}(\d+\.\d{3,})/i);return {symbol,position,lev,entry:em?.[1]};
-}
-function parseTSV(tsv){
- const lines=(tsv||'').split(/\r?\n/).filter(Boolean);if(lines.length<2)return [];
- const head=lines[0].split('\t'),idx={};head.forEach((h,i)=>idx[h]=i);const out=[];
- for(let i=1;i<lines.length;i++){const a=lines[i].split('\t');if(a.length<head.length)continue;const text=(a[idx.text]||'').trim();if(!text)continue;out.push({text,x:Number(a[idx.left]||0),y:Number(a[idx.top]||0),w:Number(a[idx.width]||0),h:Number(a[idx.height]||0),conf:Number(a[idx.conf]||0)})}return out;
-}
-function symbolFromWords(words){
- const hits=[];for(const w of words){const t=(w.text||'').replace(/\s+/g,'').replace(/[|\\]/g,'/');const m=t.match(/#?([A-Z]{2,12})\/(?:USDT|USD)/i);if(m)hits.push({symbol:m[1].toUpperCase(),x:w.x,y:w.y,w:w.w,h:w.h,conf:w.conf})}
- hits.sort((a,b)=>(b.conf-a.conf)||(a.y-b.y));return hits[0]||null;
-}
-function extractTimeCandidates(raw){
- const s=(raw||'').replace(/[OoQ]/g,'0').replace(/[IlL|]/g,'1').replace(/[Ss]/g,'5').replace(/[;,\.]/g,':');const out=[];
- const add=(h,m,source,score=1)=>{h=Number(h);m=Number(m);if(!Number.isInteger(h)||!Number.isInteger(m)||h<0||h>23||m<0||m>59)return;const time=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;if(!out.some(x=>x.time===time))out.push({time,source,score})};
- for(const m of s.matchAll(/(?:^|[^0-9])(\d{1,6})\s*:\s*([0-5]\d)(?!\d)/g)){const d=m[1];if(d.length>=2)add(d.slice(-2),m[2],'colon-2digit',4);else add(d,m[2],'colon-1digit',1)}
- const digits=s.replace(/[^0-9]/g,'');
- for(let i=0;i<=digits.length-4;i++){const q=digits.slice(i,i+4);add(q.slice(0,2),q.slice(2),'four-digit',2)}
- return out;
-}
-function parseTimeText(t){const c=extractTimeCandidates(t).filter(x=>x.source!=='colon-1digit');return c[0]?.time||extractTimeCandidates(t)[0]?.time||null}
-
-// V40: SIGNAL-LOCK OCR — isolate the actual Telegram/Signal image first,
-// then read fixed semantic regions inside that image. No page/Safari OCR is used.
-function greenPixel(r,g,b){
-  const mx=Math.max(r,g,b),mn=Math.min(r,g,b),sat=mx?((mx-mn)/mx):0;
-  return g>r+3 && g>b+2 && g>90 && sat>.035;
-}
-async function detectSignalRegion(bmp){
-  const W=bmp.width,H=bmp.height, maxW=520, sc=Math.min(1,maxW/W);
-  const w=Math.max(1,Math.round(W*sc)),h=Math.max(1,Math.round(H*sc));
-  const c=document.createElement('canvas');c.width=w;c.height=h;
-  const ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(bmp,0,0,w,h);
-  const d=ctx.getImageData(0,0,w,h).data, mask=new Uint8Array(w*h);
-  for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=(y*w+x)*4;mask[y*w+x]=greenPixel(d[i],d[i+1],d[i+2])?1:0;}
-  // Largest connected green component = Telegram wallpaper. This is robust to the
-  // white message bubble because the wallpaper remains connected around it.
-  const seen=new Uint8Array(w*h), qx=new Int32Array(w*h), qy=new Int32Array(w*h);
-  let best=null,bestN=0;
-  for(let yy=0;yy<h;yy++)for(let xx=0;xx<w;xx++){
-    const seed=yy*w+xx;if(!mask[seed]||seen[seed])continue;
-    let head=0,tail=0,minX=xx,maxX=xx,minY=yy,maxY=yy,n=0;qx[tail]=xx;qy[tail++]=yy;seen[seed]=1;
-    while(head<tail){const x=qx[head],y=qy[head++];n++;if(x<minX)minX=x;if(x>maxX)maxX=x;if(y<minY)minY=y;if(y>maxY)maxY=y;
-      const ni=[x-1,y,x+1,y,x,y-1,x,y+1];for(let k=0;k<8;k+=2){const nx=ni[k],ny=ni[k+1];if(nx<0||ny<0||nx>=w||ny>=h)continue;const j=ny*w+nx;if(mask[j]&&!seen[j]){seen[j]=1;qx[tail]=nx;qy[tail++]=ny;}}
-    }
-    if(n>bestN){bestN=n;best={minX,maxX,minY,maxY};}
-  }
-  // If no convincing green component, fall back to the whole uploaded image.
-  if(!best || bestN < w*h*.08 || (best.maxX-best.minX+1)<w*.45 || (best.maxY-best.minY+1)<h*.25)
-    return {x:0,y:0,w:W,h:H,confidence:.1,method:'full-fallback'};
-  const padX=Math.max(2,Math.round(W*.008)),padY=Math.max(2,Math.round(H*.006));
-  const x=Math.max(0,Math.round(best.minX/sc)-padX),y=Math.max(0,Math.round(best.minY/sc)-padY);
-  const r=Math.min(W,Math.round((best.maxX+1)/sc)+padX),bt=Math.min(H,Math.round((best.maxY+1)/sc)+padY);
-  return {x,y,w:r-x,h:bt-y,confidence:Math.min(1,bestN/(w*h)*3),method:'largest-green-component'};
-}
-function cropAbsolute(bmp,reg,scale=1){
-  const c=document.createElement('canvas');c.width=Math.max(1,Math.round(reg.w*scale));c.height=Math.max(1,Math.round(reg.h*scale));
-  const ctx=c.getContext('2d',{willReadFrequently:true});ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
-  ctx.drawImage(bmp,reg.x,reg.y,reg.w,reg.h,0,0,c.width,c.height);return c;
-}
-function grayThreshold(canvas,threshold=200){
-  const c=document.createElement('canvas');c.width=canvas.width;c.height=canvas.height;const ctx=c.getContext('2d',{willReadFrequently:true});
-  ctx.drawImage(canvas,0,0);const im=ctx.getImageData(0,0,c.width,c.height),p=im.data;
-  for(let i=0;i<p.length;i+=4){const g=.299*p[i]+.587*p[i+1]+.114*p[i+2];const v=g<threshold?0:255;p[i]=p[i+1]=p[i+2]=v;}
-  ctx.putImageData(im,0,0);return c;
-}
-async function ocrRegionText(bmp,frac,scale=8,psm='7',whitelist=''){
-  const W=bmp.width,H=bmp.height,reg={x:Math.round(W*frac[0]),y:Math.round(H*frac[1]),w:Math.round(W*frac[2]),h:Math.round(H*frac[3])};
-  const base=cropAbsolute(bmp,reg,scale), texts=[];
-  const cfg={tessedit_pageseg_mode:psm};if(whitelist)cfg.tessedit_char_whitelist=whitelist;
-  const a=await ocrCanvas(base,'region-normal',cfg,{text:true});texts.push((a.data.text||'').trim());
-  return {reg,texts,canvas:base};
-}
-function cleanSymbolText(t){
-  const s=(t||'').replace(/\s+/g,'').replace(/[|\\]/g,'/').replace(/USDT?/ig,'/USDT');
-  const m=s.match(/#?([A-Z][A-Z0-9]{1,11})\/(?:USDT|USD)/i);return m?m[1].toUpperCase():null;
-}
-function cleanPosition(t){const m=(t||'').match(/\b(Long|Short)\b/i);return m?(/^short$/i.test(m[1])?'Short':'Long'):null;}
-function cleanLeverage(t){const m=(t||'').match(/(?:Leverage|Cross|Isolated)[^0-9]{0,30}(\d{1,3})\s*[xX]?/i);return m?m[1]:null;}
-function cleanEntry(t){const m=(t||'').replace(/,/g,'.').match(/\b\d+\.\d{3,}\b/);return m?m[0]:null;}
-function humanDateToISO(month,day){
-  const now=new Date(),y=now.getFullYear(),m=monthNum(month),d=Number(day);if(!m||!d)return null;
-  let yy=y;const candidate=new Date(y,m-1,d);if(candidate>now)yy=y-1;
-  return `${yy}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+ const months=['January','February','March','April','May','June','July','August','September','October','November','December'];
+ const k=String(name||'').toLowerCase(); const exact=months.findIndex(x=>x.toLowerCase()===k); if(exact>=0)return exact+1;
+ const ab={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12}; if(ab[k])return ab[k];
+ let best=0,bd=99;months.forEach((x,i)=>{const d=levenshtein(k,x.toLowerCase());if(d<bd){bd=d;best=i+1}});return bd<=3?best:null;
 }
 function parseHumanDate(t){
-  const raw=normalizeDateText(t), low=raw.toLowerCase();
-  if(/\bto?d?ay\b/i.test(low) || /\btod[ao]y\b/i.test(low)){
-    const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  }
-  if(/\byester(?:day|dav)\b/i.test(low)){const d=new Date();d.setDate(d.getDate()-1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
-  const d=fuzzyMonthFromText(raw);return d?humanDateToISO(d.month,d.day):null;
+ const raw=normalizeText(t), low=raw.toLowerCase();
+ if(/\btoday\b/.test(low)){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
+ if(/\byesterday\b/.test(low)){const d=new Date();d.setDate(d.getDate()-1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
+ const months='January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec';
+ let m=raw.match(new RegExp(`\\b(${months})\\s+([0-9]{1,2})\\b`,'i'));
+ if(!m){const toks=[...raw.matchAll(/[A-Za-z]{3,15}|[0-9]{1,2}/g)];for(let i=0;i<toks.length-1;i++){if(/^[A-Za-z]/.test(toks[i][0])&&/^\d+$/.test(toks[i+1][0])){const mm=monthNum(toks[i][0]);if(mm){m=[null,toks[i][0],toks[i+1][0]];break}}}}
+ if(!m)return null; const mm=monthNum(m[1]),dd=Number(m[2]); if(!mm||dd<1||dd>31)return null;
+ const now=new Date(); let y=now.getFullYear(); const cand=new Date(y,mm-1,dd); if(cand>now)y--; return `${y}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
 }
-function extractTimeStrict(raw){
-  const s=(raw||'').replace(/[OoQ]/g,'0').replace(/[IlL|]/g,'1').replace(/[Ss]/g,'5').replace(/[;,\.]/g,':');
-  const out=[];
-  const add=(hh,mm,kind)=>{hh=String(hh).replace(/\D/g,'');mm=String(mm);if(hh.length>2)hh=hh.slice(-2);const h=Number(hh),m=Number(mm);if(h<=23&&m<=59)out.push({time:`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`,kind});};
-  for(const m of s.matchAll(/(\d{1,6})\s*:\s*([0-5]\d)/g))add(m[1],m[2],m[1].length===2?'two-digit':'joined');
-  return [...new Map(out.map(x=>[x.time,x])).values()];
+function parseTSV(tsv){
+ const lines=String(tsv||'').split(/\r?\n/).filter(Boolean);if(lines.length<2)return[];
+ const h=lines[0].split('\t'),ix={};h.forEach((v,i)=>ix[v]=i);const out=[];
+ for(let i=1;i<lines.length;i++){const a=lines[i].split('\t');if(a.length<h.length)continue;const text=(a[ix.text]||'').trim();if(!text)continue;out.push({text,x:+a[ix.left]||0,y:+a[ix.top]||0,w:+a[ix.width]||0,h:+a[ix.height]||0,conf:+a[ix.conf]||0})}return out;
+}
+function symbolCandidates(texts){
+ const out=[];
+ for(const raw of texts){const t=normalizeText(raw);
+  for(const m of t.matchAll(/#?\s*([A-Z][A-Z0-9]{1,19})\s*[\/#|JIl1\s]*\s*USDT\b/ig))out.push({token:compact(m[1]),kind:'direct'});
+  for(const m of t.matchAll(/\b([A-Z][A-Z0-9]{1,19})USDT\b/ig))out.push({token:compact(m[1]),kind:'joined'});
+ }
+ return out.filter(x=>x.token.length>=2);
+}
+let contractPromise=null;
+async function contracts(){
+ if(contractPromise)return contractPromise;
+ contractPromise=(async()=>{
+  for(const host of ['https://open-api.bingx.com','https://open-api.bingx.pro']){try{
+   const r=await fetch(host+'/openApi/swap/v2/quote/contracts?timestamp='+Date.now(),{headers:{'X-SOURCE-KEY':'BX-AI-SKILL'}});if(!r.ok)continue;const j=await r.json();
+   const a=(Array.isArray(j?.data)?j.data:[]).map(x=>String(x?.symbol||'').toUpperCase().replace(/-USDT$/,'')).filter(x=>/^[A-Z0-9]{2,20}$/.test(x));if(a.length)return [...new Set(a)];
+  }catch(e){}}
+  return [];
+ })();return contractPromise;
+}
+function fuzzyDistance(a,b){
+ a=compact(a);b=compact(b);const conf={'I':'L','L':'I','J':'I','N':'U','U':'V','V':'U','O':'Q','Q':'O','S':'5','5':'S','Z':'2','2':'Z','B':'8','8':'B'};
+ const m=a.length,n=b.length,dp=Array.from({length:m+1},()=>Array(n+1).fill(0));for(let i=0;i<=m;i++)dp[i][0]=i;for(let j=0;j<=n;j++)dp[0][j]=j;
+ for(let i=1;i<=m;i++)for(let j=1;j<=n;j++){let c=a[i-1]===b[j-1]?0:(conf[a[i-1]]===b[j-1]||conf[b[j-1]]===a[i-1] ? .3:1);dp[i][j]=Math.min(dp[i-1][j]+1,dp[i][j-1]+1,dp[i-1][j-1]+c)}return dp[m][n];
+}
+async function resolveSymbol(texts){
+ const cs=symbolCandidates(texts), bs=await contracts(); if(!cs.length)return null; if(!bs.length)return cs[0].token;
+ const scored=[];
+ for(const c of cs){
+  // Strong rule: OCR often appends one stray character (ALLOJ/XPLI). Try every prefix.
+  for(let len=2;len<=Math.min(c.token.length,12);len++){
+   const prefix=c.token.slice(0,len); const exact=bs.filter(b=>b===prefix);
+   for(const b of exact)scored.push({b,score:(c.kind==='direct'?100:80)+len*8+(len===c.token.length?30:0),reason:'exact/prefix'});
+  }
+  for(const b of bs){
+   if(Math.abs(b.length-c.token.length)>2)continue;
+   const d=fuzzyDistance(c.token,b);const sameLen=b.length===c.token.length;
+   const max=sameLen?(b.length<=3?1.5:1.8):1.0;
+   if(d<=max){let score=(c.kind==='direct'?60:50)-d*20-(Math.abs(b.length-c.token.length)*18);if(c.token.startsWith(b))score+=35;scored.push({b,score,reason:'fuzzy'});}
+  }
+ }
+ scored.sort((a,b)=>b.score-a.score||a.b.length-b.b.length||a.b.localeCompare(b.b));
+ return scored[0]?.b||null;
+}
+function parsePosition(s){const m=String(s).match(/\b(Long|Short)\b/i);return m?m[1][0].toUpperCase()+m[1].slice(1).toLowerCase():null}
+function parseLev(s){const m=String(s).match(/(?:Leverage|Cross|Isolated)[^0-9]{0,25}(\d{1,3})\s*[xX]?/i);return m?.[1]||null}
+function parseEntry(s){const m=String(s).replace(/,/g,'.').match(/\b\d+\.\d{3,}\b/);return m?.[0]||null}
+function timeCandidates(text){
+ let s=String(text||'').replace(/[OoQ]/g,'0').replace(/[IlL|]/g,'1').replace(/[Ss]/g,'5').replace(/[;,\.]/g,':');
+ const out=[];
+ // Footer OCR commonly turns the final 5 in 11:45 into "!". Treat that
+ // character as 5 only in the minute position.
+ s=s.replace(/(\d{1,2})\s*:\s*([0-5])!/g,'$1:$2'+'5');
+ s=s.replace(/(\d{1,2})\s*:\s*([0-5])[IlL]/g,'$1:$2'+'1');
+ for(const m of s.matchAll(/(?:^|[^0-9])(\d{1,2})\s*:\s*([0-5]\d)(?!\d)/g)){const h=+m[1],mi=+m[2];if(h<=23)out.push(`${String(h).padStart(2,'0')}:${String(mi).padStart(2,'0')}`)}
+ return [...new Set(out)];
 }
 
-let contractBasesPromise=null;
-async function getBingXContractBases(){
-  if(contractBasesPromise) return contractBasesPromise;
-  contractBasesPromise=(async()=>{
-    const urls=[
-      'https://open-api.bingx.com/openApi/swap/v2/quote/contracts?timestamp='+Date.now(),
-      'https://open-api.bingx.pro/openApi/swap/v2/quote/contracts?timestamp='+Date.now()
-    ];
-    for(const u of urls){
-      try{
-        const r=await fetch(u,{headers:{'X-SOURCE-KEY':'BX-AI-SKILL'}});
-        if(!r.ok) continue;
-        const j=await r.json();
-        const arr=Array.isArray(j?.data)?j.data:[];
-        const bases=arr.map(x=>String(x?.symbol||'').toUpperCase().replace(/-USDT$/,'')).filter(x=>/^[A-Z0-9]{2,20}$/.test(x));
-        if(bases.length) return [...new Set(bases)];
-      }catch(e){}
-    }
-    return [];
-  })();
-  return contractBasesPromise;
-}
-function compactOCRToken(s){
-  return String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
-}
-function symbolDistance(a,b){
-  a=compactOCRToken(a);b=compactOCRToken(b);
-  const m=a.length,n=b.length,dp=Array.from({length:m+1},()=>Array(n+1).fill(0));
-  for(let i=0;i<=m;i++)dp[i][0]=i;for(let j=0;j<=n;j++)dp[0][j]=j;
-  const conf={ 'I':'L','L':'I','J':'I','N':'U','U':'V','V':'U','O':'Q','Q':'O','S':'5','5':'S','Z':'2','2':'Z','B':'8','8':'B' };
-  for(let i=1;i<=m;i++)for(let j=1;j<=n;j++){
-    let cost=a[i-1]===b[j-1]?0:1;
-    if(conf[a[i-1]]===b[j-1] || conf[b[j-1]]===a[i-1]) cost=.35;
-    dp[i][j]=Math.min(dp[i-1][j]+1,dp[i][j-1]+1,dp[i-1][j-1]+cost);
+function cropAbsolute(bmp,reg,scale=1){const c=document.createElement('canvas');c.width=Math.max(1,Math.round(reg.w*scale));c.height=Math.max(1,Math.round(reg.h*scale));const x=c.getContext('2d',{willReadFrequently:true});x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';x.drawImage(bmp,reg.x,reg.y,reg.w,reg.h,0,0,c.width,c.height);return c}
+function greenPixel(r,g,b){const mx=Math.max(r,g,b),mn=Math.min(r,g,b),sat=mx?((mx-mn)/mx):0;return g>r+3&&g>b+2&&g>90&&sat>.035}
+async function detectSignalRegion(bmp){
+ const W=bmp.width,H=bmp.height,sc=Math.min(1,520/W),w=Math.max(1,Math.round(W*sc)),h=Math.max(1,Math.round(H*sc));
+ const c=document.createElement('canvas');c.width=w;c.height=h;const ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(bmp,0,0,w,h);
+ const d=ctx.getImageData(0,0,w,h).data,mask=new Uint8Array(w*h);
+ for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=(y*w+x)*4,r=d[i],g=d[i+1],b=d[i+2],mx=Math.max(r,g,b),mn=Math.min(r,g,b);mask[y*w+x]=(g>r+3&&g>b+2&&g>90&&((mx-mn)/Math.max(mx,1))>.035)?1:0}
+ // Pick the largest CONNECTED green area. A simple global green bounding box is wrong
+ // on screenshots of the app because the input fields are also green/dark tinted.
+ const seen=new Uint8Array(w*h),qx=new Int32Array(w*h),qy=new Int32Array(w*h);let best=null,bestN=0;
+ for(let yy=0;yy<h;yy++)for(let xx=0;xx<w;xx++){const seed=yy*w+xx;if(!mask[seed]||seen[seed])continue;let head=0,tail=0,n=0,minX=xx,maxX=xx,minY=yy,maxY=yy;qx[tail]=xx;qy[tail++]=yy;seen[seed]=1;
+  while(head<tail){const x=qx[head],y=qy[head++];n++;if(x<minX)minX=x;if(x>maxX)maxX=x;if(y<minY)minY=y;if(y>maxY)maxY=y;
+   const pts=[[x-1,y],[x+1,y],[x,y-1],[x,y+1]];for(const [nx,ny] of pts){if(nx<0||ny<0||nx>=w||ny>=h)continue;const j=ny*w+nx;if(mask[j]&&!seen[j]){seen[j]=1;qx[tail]=nx;qy[tail++]=ny}}
   }
-  return dp[m][n];
+  const bw=maxX-minX+1,bh=maxY-minY+1;
+  if(n>bestN && bw>w*.45 && bh>h*.25){bestN=n;best={minX,maxX,minY,maxY}}
+ }
+ if(!best)return{x:0,y:0,w:W,h:H,method:'full-fallback'};
+ const padX=Math.max(3,Math.round(W*.008)),padY=Math.max(3,Math.round(H*.006));
+ const x=Math.max(0,Math.round(best.minX/sc)-padX),y=Math.max(0,Math.round(best.minY/sc)-padY),r=Math.min(W,Math.round((best.maxX+1)/sc)+padX),b=Math.min(H,Math.round((best.maxY+1)/sc)+padY);
+ return{x,y,w:r-x,h:b-y,method:'largest-connected-green'};
 }
-function extractSymbolOCRCandidates(texts){
-  const out=[];
-  for(const raw of texts){
-    const t=String(raw||'').replace(/\r/g,'\n');
-    const direct=[...t.matchAll(/#?\s*([A-Z][A-Z0-9]{1,19})\s*[\/#|JIl1\s]*USDT\b/ig)];
-    for(const m of direct) out.push({token:compactOCRToken(m[1]),kind:'direct',raw:m[0]});
-    // Tesseract sometimes drops the slash/hash and returns e.g. NIJUSDT or XPLIUSDT.
-    const joined=[...t.matchAll(/\b([A-Z][A-Z0-9]{1,19})USDT\b/ig)];
-    for(const m of joined) out.push({token:compactOCRToken(m[1]),kind:'joined',raw:m[0]});
-  }
-  return out.filter(x=>x.token.length>=2);
-}
-async function resolveAuthoritativeSymbol(texts){
-  const candidates=extractSymbolOCRCandidates(texts);
-  const exact=candidates.find(x=>/^[A-Z0-9]{2,20}$/.test(x.token));
-  const bases=await getBingXContractBases();
-  if(!bases.length) return exact?.token||null;
-  const scored=[];
-  for(const c of candidates){
-    for(const b of bases){
-      const d=symbolDistance(c.token,b);
-      const maxD=b.length<=3?1.9:(b.length<=5?1.6:2.2);
-      if(d<=maxD){
-        const prefix=c.token.startsWith(b)?1.8:0;
-        const suffix=c.token.endsWith(b)?1.2:0;
-        const lenPenalty=Math.abs(c.token.length-b.length)*0.18;
-        const exact=b===c.token?3.5:0;
-        scored.push({symbol:b,d,kind:c.kind,token:c.token,score:(c.kind==='direct'?3:2)-d+prefix+suffix+exact-lenPenalty});
-      }
-    }
-  }
-  scored.sort((a,b)=>b.score-a.score||a.d-b.d||Math.abs(a.symbol.length-a.token.length)-Math.abs(b.symbol.length-b.token.length)||a.symbol.localeCompare(b.symbol));
-  return scored[0]?.symbol||exact?.token||null;
-}
-async function readSignalFields(signal,fullText=''){ 
-  const W=signal.width,H=signal.height;
-  async function one(reg,scale,psm,whitelist=''){
-    const base=cropAbsolute(signal,reg,scale),cfg={tessedit_pageseg_mode:psm};
-    if(whitelist)cfg.tessedit_char_whitelist=whitelist;
-    const r=await ocrCanvas(base,'semantic',cfg,{text:true});return (r.data.text||'').trim();
-  }
-  const headerReg={x:W*.045,y:H*.045,w:W*.90,h:H*.22};
-  const headerTexts=[await one(headerReg,10,'6'),await one(headerReg,10,'11')];
-  const bodyReg={x:W*.04,y:H*.18,w:W*.90,h:H*.62};
-  const bodyTexts=[await one(bodyReg,7,'6'),await one(bodyReg,7,'11')];
-  const entryReg={x:W*.04,y:H*.27,w:W*.82,h:H*.30};
-  const entryTexts=[await one(entryReg,9,'6','0123456789.'),await one(entryReg,9,'11','0123456789.')];
 
-  // AUTHORITATIVE SYMBOL SOURCE: full-image OCR / TSV text. A valid result MUST
-  // contain /USDT or /USD, so the webpage's old Symbol field (e.g. XPLI) can never win.
-  const sources=[fullText,...headerTexts,...bodyTexts];
-  // AUTHORITATIVE SYMBOL: resolve OCR token against the live BingX perpetual-contract
-  // list. This prevents page-field contamination (XPLI) and corrects OCR mutations
-  // such as NIJUSDT -> UNI-USDT when the actual contract exists.
-  let symbol=await resolveAuthoritativeSymbol(sources);
-
-  // DATE is taken from the Signal header/full OCR. Today is resolved from device date.
-  let date=null;
-  for(const t of [fullText,...headerTexts]){const q=parseHumanDate(t);if(q){date=q;break;}}
-  const allBody=[fullText,...bodyTexts].join('\n');
-  const position=cleanPosition(allBody);
-  const lev=cleanLeverage(allBody);
-  let entry=null;
-  for(const t of entryTexts){const q=cleanEntry(t);if(q){entry=q;break;}}
-  if(!entry)entry=cleanEntry(allBody);
-
-  // Keep the proven V41 timestamp reader, but constrain it to the locked Signal region.
-  const timeBase=cropAbsolute(signal,{x:W*.43,y:H*.76,w:W*.38,h:H*.22},12);
-  const timeTexts=[];
-  for(const psm of ['6','7','8','13']){
-    const r=await ocrCanvas(timeBase,'time',{tessedit_pageseg_mode:psm,tessedit_char_whitelist:'0123456789:'},{text:true});
-    timeTexts.push((r.data.text||'').trim());
-  }
-  const tc=timeTexts.flatMap(extractTimeStrict), counts=new Map();
-  for(const q of tc){const weight=q.kind==='two-digit'?4:2;counts.set(q.time,(counts.get(q.time)||0)+weight);}
-  const time=[...counts.entries()].sort((a,b)=>b[1]-a[1])[0]?.[0]||null;
-  return {symbol,position,lev,entry,date,time,debug:{full:fullText,header:headerTexts,body:bodyTexts,entry:entryTexts,time:timeTexts,timeVotes:[...counts.entries()]}};
-}
+async function ocrCanvas(canvas,label,config={},output={text:true}){const w=await getOCRWorker();try{return await w.recognize(canvas,config,output)}catch(e){return await w.recognize(canvas.toDataURL('image/jpeg',.92),config,output)}}
 async function runOCR(){
  if(!imageFile){setStatus('กรุณาเลือกรูปก่อน','error');return}
- $('ocrStatus').textContent='กำลังสแกน V46 — iOS-safe Full Signal OCR...';['date','entryTime','symbol','entry'].forEach(id=>$(id).value='');
+ $('ocrStatus').textContent='กำลังสแกน V47 — Fast Signal OCR...';['date','entryTime','symbol','entry'].forEach(id=>$(id).value='');
  try{
-  const bmp=await fileToCanvas(imageFile);
-  // One full OCR pass is the anchor for Symbol/Date. It reliably sees #COIN/USDT
-  // even when the green Signal wallpaper confuses a local crop.
-  const full=await ocrCanvas(bmp,'full-signal',{tessedit_pageseg_mode:'11'},{text:true});
-  const region=await detectSignalRegion(bmp);
-  const signal=cropAbsolute(bmp,region,1);
-  const f=await readSignalFields(signal,(full.data.text||''));
-  if(f.date)$('date').value=f.date;if(f.time)$('entryTime').value=f.time;if(f.symbol)$('symbol').value=f.symbol;
-  if(f.position)$('position').value=f.position;if(f.lev)$('lev').value=f.lev;if(f.entry)$('entry').value=f.entry;
-  const dbg=[`REGION ${region.x},${region.y},${region.w},${region.h} (${region.method})`,`FULL ${JSON.stringify(f.debug.full)}`,`HEADER ${JSON.stringify(f.debug.header)}`,`BODY ${JSON.stringify(f.debug.body)}`,`ENTRY ${JSON.stringify(f.debug.entry)}`,`TIME ${JSON.stringify(f.debug.time)}`,`TIME_VOTES ${JSON.stringify(f.debug.timeVotes)}`];
-  $('ocrRaw').textContent=dbg.join('\n');renderMeta();
+  const bmp=await fileToCanvas(imageFile);const region=await detectSignalRegion(bmp);const signal=cropAbsolute(bmp,region,1);
+  // ONE main OCR pass with TSV. TSV gives text + coordinates, so we do not repeatedly OCR the same image.
+  const main=await ocrCanvas(signal,'main',{tessedit_pageseg_mode:'11'},{text:true,tsv:true});
+  const words=parseTSV(main.data.tsv||'');const text=main.data.text||words.map(w=>w.text).join(' ');
+  // Symbol/date: header only, small and fast. This is the only additional OCR pass.
+  const W=signal.width,H=signal.height;const header=cropAbsolute(signal,{x:0,y:0,w:W*.75,h:H*.23},5);const hr=await ocrCanvas(header,'header',{tessedit_pageseg_mode:'6',tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789#/_ '},{text:true});
+  const headerText=hr.data.text||'';
+  const symbol=await resolveSymbol([headerText,text]);
+  const date=parseHumanDate(headerText)||parseHumanDate(text);
+  const position=parsePosition(text),lev=parseLev(text);
+  let entry=null;const ei=text.search(/Entry\s+Targets?/i);if(ei>=0)entry=parseEntry(text.slice(ei,ei+180));if(!entry)entry=parseEntry(text);
+  // Time: use TSV coordinates first, then one narrow footer OCR. This avoids the old fixed crop that could miss 11:45.
+  const bottomWords=words.filter(w=>w.y>H*.76 && w.x>W*.30);const bottomText=bottomWords.map(w=>w.text).join(' ');let times=timeCandidates(bottomText);
+  let footerText='';if(!times.length){const footer=cropAbsolute(signal,{x:W*.20,y:H*.76,w:W*.72,h:H*.22},10);const fr=await ocrCanvas(footer,'footer',{tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789:'},{text:true});footerText=fr.data.text||'';times=timeCandidates(footerText)}
+  const time=times[0]||null;
+  if(date)$('date').value=date;if(time)$('entryTime').value=time;if(symbol)$('symbol').value=symbol;if(position)$('position').value=position;if(lev)$('lev').value=lev;if(entry)$('entry').value=entry;
+  $('ocrRaw').textContent=[`V47 REGION ${JSON.stringify(region)}`,`HEADER ${headerText.trim()}`,`MAIN ${text.trim()}`,`BOTTOM ${bottomText.trim()}`,`FOOTER ${footerText.trim()}`].join('\n');renderMeta();
   const missing=[];if(!$('date').value)missing.push('วันที่');if(!$('entryTime').value)missing.push('เวลาเข้า');if(!$('symbol').value)missing.push('Symbol');if(!$('position').value)missing.push('Long/Short');if(!$('lev').value)missing.push('Leverage');if(!$('entry').value)missing.push('Entry Price');
-  if(missing.length)$('ocrStatus').innerHTML='<span class="warn">⚠ V46 อ่านได้บางส่วน — ยังขาด: '+missing.join(', ')+'</span>';else $('ocrStatus').innerHTML='<span class="ok">✓ V46 iOS Full Signal OCR: '+$('date').value+' '+$('entryTime').value+' | '+$('symbol').value+' | '+$('position').value+' | '+$('lev').value+'x | Entry '+$('entry').value+'</span>';
+  $('ocrStatus').innerHTML=missing.length?'<span class="warn">⚠ V47 อ่านได้บางส่วน — ยังขาด: '+missing.join(', ')+'</span>':'<span class="ok">✓ V47 Fast OCR: '+$('date').value+' '+$('entryTime').value+' | '+$('symbol').value+' | '+$('position').value+' | '+$('lev').value+'x | Entry '+$('entry').value+'</span>';
  }catch(e){console.error(e);$('ocrStatus').innerHTML='<span class="error">OCR error: '+(e?.message||e)+'</span>'}
 }
 
