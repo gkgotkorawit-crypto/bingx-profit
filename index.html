@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BingX Profit Calculator V33 SMART OCR</title>
+<title>BingX Profit Calculator V36 REGION OCR</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0b1118">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -346,6 +346,74 @@ function symbolFromWords(words){
  return hits.length?hits[0]:null;
 }
 
+
+function detectSignalRightEdge(bmp){
+ const W=bmp.width,H=bmp.height;
+ // Telegram signal bubble has a strong, long vertical boundary around 55-57% of image width.
+ // This also works when the uploaded file is an iPhone screenshot containing the signal preview.
+ const maxW=900, sc=Math.min(1,maxW/W), w=Math.max(1,Math.round(W*sc)), h=Math.max(1,Math.round(H*sc));
+ const c=document.createElement('canvas'); c.width=w;c.height=h;
+ c.getContext('2d',{willReadFrequently:true}).drawImage(bmp,0,0,w,h);
+ const g=c.getContext('2d',{willReadFrequently:true}).getImageData(0,0,w,h).data;
+ const prof=new Float32Array(Math.max(1,w-1));
+ for(let y=Math.floor(h*.08);y<Math.floor(h*.95);y++){
+   const row=y*w*4;
+   for(let x=Math.floor(w*.30);x<Math.floor(w*.82);x++){
+     const i=row+x*4,j=i+4;
+     const a=.299*g[i]+.587*g[i+1]+.114*g[i+2];
+     const b=.299*g[j]+.587*g[j+1]+.114*g[j+2];
+     prof[x]+=Math.abs(a-b);
+   }
+ }
+ // smooth to suppress text-level vertical strokes
+ let best=-1,bv=-1;
+ for(let x=Math.floor(w*.35);x<Math.floor(w*.78);x++){
+   let v=0; for(let k=-4;k<=4;k++){const q=x+k;if(q>=0&&q<prof.length)v+=prof[q];}
+   if(v>bv){bv=v;best=x;}
+ }
+ return best>0?Math.round(best/sc):null;
+}
+
+function findStopAnchor(words){
+ const hits=words.filter(w=>/^Stop$/i.test((w.text||'').trim()));
+ if(!hits.length)return null;
+ hits.sort((a,b)=>b.y-a.y || b.conf-a.conf);
+ return hits[0];
+}
+
+async function targetedTimeFromSignalLayout(bmp,words){
+ const W=bmp.width,H=bmp.height;
+ const right=detectSignalRightEdge(bmp);
+ const stop=findStopAnchor(words);
+ if(!right || !stop)return {time:null,raw:'',layout:null};
+ // Timestamp sits below the Stop Targets line, close to the bubble's right edge.
+ const left=Math.max(0,right-270);
+ const top=Math.min(H-1,stop.y+Math.max(8,stop.h*.35));
+ const bottom=Math.min(H,top+Math.max(100,stop.h*2.8));
+ const sw=Math.max(1,right-6-left),sh=Math.max(1,bottom-top);
+ const c=document.createElement('canvas');c.width=Math.round(sw*10);c.height=Math.round(sh*10);
+ const ctx=c.getContext('2d',{willReadFrequently:true});ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+ ctx.drawImage(bmp,left,top,sw,sh,0,0,c.width,c.height);
+ const base=ctx.getImageData(0,0,c.width,c.height);
+ const variants=[null,150,190];
+ const all=[];
+ for(const th of variants){
+   const im=new ImageData(new Uint8ClampedArray(base.data),base.width,base.height),px=im.data;
+   if(th){for(let i=0;i<px.length;i+=4){const g=.299*px[i]+.587*px[i+1]+.114*px[i+2];const v=g<th?0:255;px[i]=px[i+1]=px[i+2]=v;}}
+   ctx.putImageData(im,0,0);
+   const r=await ocrCanvas(c,'layout-time-'+(th??'gray'),{tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789:'},{text:true});
+   const raw=r.data.text||'';
+   for(const q of extractTimeCandidates(raw)) all.push({...q,raw,th});
+ }
+ // Prefer a candidate repeated by the same stable crop. Never let a one-digit crop
+ // override a valid two-digit hour.
+ const cnt=new Map();
+ for(const q of all){const e=cnt.get(q.time)||{time:q.time,votes:0,score:0,raw:[]};e.votes++;e.score+=q.score;e.raw.push(q.raw.trim());cnt.set(q.time,e)}
+ const ranked=[...cnt.values()].sort((a,b)=>b.votes-a.votes||b.score-a.score);
+ const best=ranked[0];
+ return {time:best?.time||null,raw:best?.raw?.join(' | ')||'',layout:{right,stopY:stop.y,candidates:ranked.slice(0,5)}};
+}
+
 async function targetedDateFromSymbol(bmp,symbolBox){
  if(!symbolBox)return {date:null,raw:''};
  const W=bmp.width,H=bmp.height;
@@ -448,7 +516,7 @@ async function targetedEntryOCR(bmp,words){
  return {entry:m?m[0]:null,raw};
 }
 
-// SMART OCR V35 — VOTING OCR:
+// REGION OCR V36 — LAYOUT ANCHORED OCR:
 // 1) One full-page OCR with TSV to locate the actual signal symbol.
 // 2) Date is read relative to that symbol (works with Search/Pinned Message shifts).
 // 3) Time is read from one compact bottom-right numeric strip.
@@ -463,13 +531,14 @@ async function smartFieldOCR(imageFile,fullText,words){
  const d=await targetedDateFromSymbol(bmp,symbolBox);
  date=d.date;debug.push('DATE_ANCHOR '+(d.raw||'-'));
 
- const tm=await targetedTimeOCRFast(bmp);
+ const tm=await targetedTimeFromSignalLayout(bmp,words);
  time=tm.time;
- debug.push('TIME_VOTE '+(tm.raw||'-'));
- if(tm.candidates?.length) debug.push('TIME_TOP '+tm.candidates.map(x=>`${x.time}(${x.votes})`).join(', '));
+ debug.push('SIGNAL_RIGHT '+(tm.layout?.right??'-')+' STOP_Y '+(tm.layout?.stopY??'-'));
+ debug.push('TIME_LAYOUT '+(tm.raw||'-'));
+ if(tm.layout?.candidates?.length) debug.push('TIME_TOP '+tm.layout.candidates.map(x=>`${x.time}(${x.votes})`).join(', '));
 
- const eo=await targetedEntryOCR(bmp,words);
- entry=eo.entry;debug.push('ENTRY_ANCHOR '+(eo.raw||'-'));
+ let eo={entry:null,raw:''};
+ if(!entry){ eo=await targetedEntryOCR(bmp,words); entry=eo.entry; debug.push('ENTRY_ANCHOR '+(eo.raw||'-')); } else { debug.push('ENTRY_FULL '+entry); }
 
  if(!date){date=monthFromText(fullText);if(date)debug.push('DATE_FULL_FALLBACK');}
  if(!time){time=parseTimeText(fullText);if(time)debug.push('TIME_FULL_FALLBACK');}
@@ -481,7 +550,7 @@ function monthNum(name){return new Date(Date.parse(name+' 1, 2000')).getMonth()+
 
 async function runOCR(){
  if(!imageFile){setStatus('กรุณาเลือกรูปก่อน','error');return}
- $('ocrStatus').textContent='กำลังสแกนแบบ Smart OCR — แยกวันที่/เวลา/Symbol/Entry...';
+ $('ocrStatus').textContent='กำลังสแกนแบบ Region OCR — หา Signal Bubble ก่อน แล้วค่อยอ่านวันที่/เวลา/Symbol/Entry...';
  ['date','entryTime','symbol','entry'].forEach(id=>$(id).value='');
  try{
   const bmp=await createImageBitmap(imageFile),W=bmp.width,H=bmp.height;
