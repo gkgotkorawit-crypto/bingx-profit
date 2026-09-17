@@ -3,14 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BingX Profit Calculator V48 SMART OCR</title>
+<title>BingX Profit Calculator V50 AI VISION ENGINE</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0b1118">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="BingX Profit">
 <link rel="apple-touch-icon" href="icon-180.png">
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
 :root{--bg:#0b1118;--card:#121b26;--line:#273548;--text:#eef4fa;--muted:#91a1b4;--green:#20d19b;--red:#ff6b6b;--blue:#6ea8fe}
 *{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#091018,#0e151e);font-family:Arial,sans-serif;color:var(--text)}
@@ -33,8 +32,18 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 <body>
 <div class="wrap">
 <div class="card">
-<h1>⚡ BingX Profit Calculator <span style="font-size:11px;color:#20d19b;border:1px solid #20d19b;border-radius:999px;padding:3px 7px;vertical-align:middle">V48 SMART OCR</span></h1>
+<h1>⚡ BingX Profit Calculator <span style="font-size:11px;color:#20d19b;border:1px solid #20d19b;border-radius:999px;padding:3px 7px;vertical-align:middle">V50 AI VISION ENGINE</span></h1>
 <div class="sub">📱 iPhone / iPad — เพิ่มลงหน้าจอหลักจาก Safari ได้<br>อัปโหลดภาพ Signal → ระบบ OCR ข้อมูลในภาพ → คุณกรอกเฉพาะ LAST PRICE → ระบบค้นหาเวลาแตะราคาแรกหลังเข้าออเดอร์ และคำนวณระยะเวลา</div>
+</div>
+
+<div class="card">
+<label>🔐 Gemini Vision</label>
+<div class="grid">
+<div><label>Gemini API Key</label><input id="geminiKey" type="password" placeholder="AIza..." autocomplete="off"></div>
+<div><label>Vision Model</label><select id="geminiModel"><option value="gemini-3.8-flash">Gemini 3.8 Flash</option><option value="gemini-3.7-flash">Gemini 3.7 Flash</option><option value="gemini-3.6-flash">Gemini 3.6 Flash</option><option value="gemini-2.5-flash" selected>Gemini 2.5 Flash</option></select></div>
+</div>
+<div class="row" style="margin-top:10px"><button id="saveGemini" class="secondary">💾 บันทึก Key ในเครื่อง</button><button id="clearGemini" class="danger">ลบ Key</button></div>
+<div class="small" style="margin-top:8px">Key เก็บไว้ใน browser เครื่องนี้และใช้เรียก Gemini โดยตรง</div>
 </div>
 
 <div class="card">
@@ -96,336 +105,77 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 const $=id=>document.getElementById(id);
 let imageFile=null, ocrText='', extracted={targets:[]};
 let ocrWorkerPromise=null;
-async function getOCRWorker(){
- if(!ocrWorkerPromise){
-  $('ocrStatus').textContent='กำลังโหลด OCR ครั้งแรก...';
-  ocrWorkerPromise=Tesseract.createWorker('eng',1,{logger:m=>{if(m.status&&m.progress!=null)$('ocrStatus').textContent=`OCR: ${m.status} ${Math.round(m.progress*100)}%`;}});
- }
- return await ocrWorkerPromise;
+const GEMINI_KEY_STORAGE='bingx_gemini_key';
+const GEMINI_MODEL_STORAGE='bingx_gemini_model';
+const MAX_IMAGE_EDGE=1800;
+let currentFile=null;
+function loadGeminiSettings(){
+ $('geminiKey').value=localStorage.getItem(GEMINI_KEY_STORAGE)||'';
+ const m=localStorage.getItem(GEMINI_MODEL_STORAGE)||'gemini-2.5-flash';
+ if([...$('geminiModel').options].some(o=>o.value===m)) $('geminiModel').value=m;
 }
+function saveGeminiSettings(){
+ const k=$('geminiKey').value.trim(); if(k)localStorage.setItem(GEMINI_KEY_STORAGE,k);else localStorage.removeItem(GEMINI_KEY_STORAGE);
+ localStorage.setItem(GEMINI_MODEL_STORAGE,$('geminiModel').value); setStatus('✓ บันทึก Gemini API Key ในเครื่องแล้ว','status');
+}
+$('saveGemini').onclick=saveGeminiSettings;
+$('clearGemini').onclick=()=>{localStorage.removeItem(GEMINI_KEY_STORAGE);$('geminiKey').value='';setStatus('ลบ Gemini API Key แล้ว','status');};
+$('geminiModel').onchange=()=>localStorage.setItem(GEMINI_MODEL_STORAGE,$('geminiModel').value);
+loadGeminiSettings();
+function normalizeDateAI(v){const m=String(v||'').match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);if(!m)return '';const d=new Date(+m[1],+m[2]-1,+m[3]);return d.getFullYear()==+m[1]&&d.getMonth()==+m[2]-1&&d.getDate()==+m[3]?`${m[1]}-${String(+m[2]).padStart(2,'0')}-${String(+m[3]).padStart(2,'0')}`:''}
+function normalizeTimeAI(v){const m=String(v||'').match(/^(\d{1,2}):(\d{2})$/);if(!m)return '';const h=+m[1],mi=+m[2];return h<24&&mi<60?`${String(h).padStart(2,'0')}:${String(mi).padStart(2,'0')}`:''}
+function normalizeSymbolAI(v){let s=String(v||'').toUpperCase().trim().replace(/^#/,'').replace(/[^A-Z0-9]/g,'').replace(/USDT$/,'');return /^[A-Z0-9]{2,20}$/.test(s)?s:''}
+function normalizeEntryAI(v){const m=String(v??'').replace(/,/g,'').match(/\d+(?:\.\d+)?/);return m?m[0]:''}
+function normalizePositionAI(v){const s=String(v||'').toLowerCase();return s.includes('long')?'Long':s.includes('short')?'Short':''}
+function normalizeLevAI(v){const n=Number(String(v||'').replace(/[^0-9.]/g,''));return n>0&&n<=1000?String(n):''}
+async function prepareGeminiImage(file){
+ const bmp=await createImageBitmap(file); const scale=Math.min(1,MAX_IMAGE_EDGE/Math.max(bmp.width,bmp.height));
+ const c=document.createElement('canvas');c.width=Math.max(1,Math.round(bmp.width*scale));c.height=Math.max(1,Math.round(bmp.height*scale));
+ c.getContext('2d',{alpha:false}).drawImage(bmp,0,0,c.width,c.height); bmp.close?.();
+ return {mime:'image/jpeg',data:c.toDataURL('image/jpeg',.88).split(',')[1],width:c.width,height:c.height};
+}
+const VISION_PROMPT=`You are a precision visual extraction engine for a Telegram crypto trading Signal. Return only the JSON schema. First locate the actual Telegram Signal message inside the uploaded image. The image may be a raw Signal or a screenshot of a web app containing the Signal. IGNORE browser chrome, web-app controls, input fields, old values, filenames, status text and all text outside the Signal.
 
-function setStatus(msg,cls='status'){$('status').className=cls;$('status').textContent=msg}
-function fmt(n){return Number(n).toLocaleString('en-US',{maximumFractionDigits:8})}
-function duration(ms){
- if(ms==null)return '-';
- let s=Math.max(0,Math.floor(ms/1000)),d=Math.floor(s/86400);s%=86400;
- let h=Math.floor(s/3600);s%=3600;let m=Math.floor(s/60);s%=60;
- return (d?d+'d ':'')+(h?h+'h ':'')+(m?m+'m ':'')+s+'s';
-}
-function localISODate(d){return d.toISOString().slice(0,10)}
+Extract exactly these fields from the Signal:
+- symbol: the complete base symbol after # and before /USDT. Preserve the first letter. Examples: #APT/USDT => APT; #ALLO/USDT => ALLO; #XPL/USDT => XPL; #UNI/USDT => UNI. Never drop a leading letter and never invent a symbol.
+- date: Telegram date separator such as September 16, converted to YYYY-MM-DD using the current year supplied below. Today/Yesterday are relative to the supplied current date.
+- time: ONLY the small Telegram message timestamp at the bottom-right of the Signal message, HH:MM. Never use device time, browser time or upload time.
+- position: Long or Short from Signal Type.
+- leverage: numeric leverage from Leverage line.
+- entry_price: exact Entry Targets text, preserving trailing zeros such as 0.54640.
 
-$('file').onchange=async e=>{
- imageFile=e.target.files[0]; if(!imageFile)return;
- $('preview').src=URL.createObjectURL(imageFile);$('preview').style.display='block';
- await runOCR();
-};
-$('ocrBtn').onclick=()=>runOCR();
-
-async function fileToCanvas(file){
- return await new Promise((resolve,reject)=>{
-  const url=URL.createObjectURL(file),img=new Image();
-  img.onload=()=>{try{const maxW=1800,scale=Math.min(1,maxW/img.naturalWidth);const c=document.createElement('canvas');c.width=Math.max(1,Math.round(img.naturalWidth*scale));c.height=Math.max(1,Math.round(img.naturalHeight*scale));const ctx=c.getContext('2d',{willReadFrequently:true});ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(url);resolve(c)}catch(e){URL.revokeObjectURL(url);reject(e)}};
-  img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error('iPhone อ่านไฟล์ภาพไม่ได้'))};img.src=url;
- });
+Important visual rules: prioritize the actual #SYMBOL/USDT header; prioritize the Telegram date pill/separator; prioritize the tiny footer timestamp near the eye/view count; do not substitute data from the surrounding webpage. If a field is not visually reliable, return an empty string and explain in notes. Do not guess.
+Current local date: ${new Date().toISOString().slice(0,10)}.`;
+function schema(){return {type:'object',properties:{symbol:{type:'string'},date:{type:'string'},time:{type:'string'},position:{type:'string',enum:['Long','Short','']},leverage:{type:'number'},entry_price:{type:'string'},confidence_symbol:{type:'number'},confidence_date:{type:'number'},confidence_time:{type:'number'},confidence_position:{type:'number'},confidence_leverage:{type:'number'},confidence_entry:{type:'number'},signal_found:{type:'boolean'},notes:{type:'string'}},required:['symbol','date','time','position','leverage','entry_price','confidence_symbol','confidence_date','confidence_time','confidence_position','confidence_leverage','confidence_entry','signal_found','notes']};}
+async function callGeminiVision(img){
+ const key=$('geminiKey').value.trim()||localStorage.getItem(GEMINI_KEY_STORAGE)||''; if(!key)throw new Error('กรุณาใส่ Gemini API Key ก่อน');
+ const model=$('geminiModel').value; const url=`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
+ const body={contents:[{role:'user',parts:[{text:VISION_PROMPT},{inline_data:{mime_type:img.mime,data:img.data}}]}],generationConfig:{temperature:0,responseMimeType:'application/json',responseSchema:schema()}};
+ const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const text=await r.text();
+ if(!r.ok)throw new Error(`Gemini HTTP ${r.status}: ${text.slice(0,300)}`);
+ const j=JSON.parse(text); const raw=j?.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||''; if(!raw)throw new Error('Gemini ไม่ส่งผลลัพธ์');
+ let data; try{data=JSON.parse(raw)}catch{const a=raw.indexOf('{'),b=raw.lastIndexOf('}');if(a<0||b<=a)throw new Error('Gemini JSON ไม่ถูกต้อง');data=JSON.parse(raw.slice(a,b+1));}
+ return {data,raw,j};
 }
-async function ocrCanvas(canvas,label,extraConfig={},output={text:true}){
- const worker=await getOCRWorker();
- // iOS Safari can fail when Tesseract receives an ImageBitmap directly.
- // Always give it a normal HTMLCanvasElement; if that still fails, retry with a data URL.
- let source=canvas;
- if(!(source instanceof HTMLCanvasElement)){
-  const c=document.createElement('canvas');c.width=source.width;c.height=source.height;c.getContext('2d').drawImage(source,0,0);source=c;
- }
- try{return await worker.recognize(source,extraConfig,output)}
- catch(e){
-  try{return await worker.recognize(source.toDataURL('image/jpeg',0.92),extraConfig,output)}
-  catch(e2){throw new Error((e2&&e2.message)||e.message||'Tesseract อ่านภาพไม่ได้')}
- }
+function applyAIResult(x){
+ const date=normalizeDateAI(x.date),time=normalizeTimeAI(x.time),symbol=normalizeSymbolAI(x.symbol),position=normalizePositionAI(x.position),lev=normalizeLevAI(x.leverage),entry=normalizeEntryAI(x.entry_price);
+ if(date)$('date').value=date;if(time)$('entryTime').value=time;if(symbol)$('symbol').value=symbol;if(position)$('position').value=position;if(lev)$('lev').value=lev;if(entry)$('entry').value=entry;renderMeta();
+ const conf={symbol:Number(x.confidence_symbol||0),date:Number(x.confidence_date||0),time:Number(x.confidence_time||0),position:Number(x.confidence_position||0),leverage:Number(x.confidence_leverage||0),entry:Number(x.confidence_entry||0)};
+ return {date,time,symbol,position,lev,entry,conf,notes:String(x.notes||'')};
 }
-function levenshtein(a,b){
- const m=a.length,n=b.length;if(!m)return n;if(!n)return m;
- let p=Array(n+1);for(let j=0;j<=n;j++)p[j]=j;
- for(let i=1;i<=m;i++){let q=[i];for(let j=1;j<=n;j++)q[j]=Math.min(q[j-1]+1,p[j]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p=q;}return p[n];
-}
-function compact(s){return String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'')}
-function normalizeText(s){return String(s||'').replace(/\u00a0/g,' ').replace(/\r/g,'\n')}
-function monthNum(name){
- const months=['January','February','March','April','May','June','July','August','September','October','November','December'];
- const k=String(name||'').toLowerCase(); const exact=months.findIndex(x=>x.toLowerCase()===k); if(exact>=0)return exact+1;
- const ab={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12}; if(ab[k])return ab[k];
- let best=0,bd=99;months.forEach((x,i)=>{const d=levenshtein(k,x.toLowerCase());if(d<bd){bd=d;best=i+1}});return bd<=3?best:null;
-}
-function parseHumanDate(t){
- const raw=normalizeText(t), low=raw.toLowerCase();
- if(/\btoday\b/.test(low)){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
- if(/\byesterday\b/.test(low)){const d=new Date();d.setDate(d.getDate()-1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
- const months='January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec';
- let m=raw.match(new RegExp(`\\b(${months})\\s+([0-9]{1,2})\\b`,'i'));
- if(!m){const toks=[...raw.matchAll(/[A-Za-z]{3,15}|[0-9]{1,2}/g)];for(let i=0;i<toks.length-1;i++){if(/^[A-Za-z]/.test(toks[i][0])&&/^\d+$/.test(toks[i+1][0])){const mm=monthNum(toks[i][0]);if(mm){m=[null,toks[i][0],toks[i+1][0]];break}}}}
- if(!m)return null; const mm=monthNum(m[1]),dd=Number(m[2]); if(!mm||dd<1||dd>31)return null;
- const now=new Date(); let y=now.getFullYear(); const cand=new Date(y,mm-1,dd); if(cand>now)y--; return `${y}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
-}
-function parseTSV(tsv){
- const lines=String(tsv||'').split(/\r?\n/).filter(Boolean);if(lines.length<2)return[];
- const h=lines[0].split('\t'),ix={};h.forEach((v,i)=>ix[v]=i);const out=[];
- for(let i=1;i<lines.length;i++){const a=lines[i].split('\t');if(a.length<h.length)continue;const text=(a[ix.text]||'').trim();if(!text)continue;out.push({text,x:+a[ix.left]||0,y:+a[ix.top]||0,w:+a[ix.width]||0,h:+a[ix.height]||0,conf:+a[ix.conf]||0})}return out;
-}
-function symbolCandidates(texts){
- const out=[];
- for(const raw of texts){
-  const t=normalizeText(raw).toUpperCase();
-  // Prefer the token immediately before /USDT. This prevents words from the page
-  // or the app's own input boxes from becoming the symbol.
-  for(const m of t.matchAll(/#?\s*([A-Z][A-Z0-9]{1,19})\s*[/#|JIl1\s]*\s*USDT\b/g)){
-   out.push({token:compact(m[1]),kind:'direct'});
-  }
-  for(const m of t.matchAll(/\b([A-Z][A-Z0-9]{1,19})USDT\b/g)){
-   out.push({token:compact(m[1]),kind:'joined'});
-  }
- }
- return out.filter(x=>x.token.length>=2);
-}
-let contractPromise=null;
-async function contracts(){
- if(contractPromise)return contractPromise;
- contractPromise=(async()=>{
-  const hosts=['https://open-api.bingx.com','https://open-api.bingx.pro'];
-  const urls=[];
-  for(const host of hosts){
-   const u=host+'/openApi/swap/v2/quote/contracts?timestamp='+Date.now();
-   urls.push({url:u,headers:{'X-SOURCE-KEY':'BX-AI-SKILL'},name:'BingX'});
-   urls.push({url:'https://api.allorigins.win/raw?url='+encodeURIComponent(u),headers:{},name:'AllOrigins'});
-   urls.push({url:'https://corsproxy.io/?url='+encodeURIComponent(u),headers:{},name:'CorsProxy'});
-  }
-  for(const item of urls){
-   try{
-    const r=await fetch(item.url,{cache:'no-store',headers:item.headers||{}});
-    if(!r.ok)continue;
-    const j=await r.json();
-    const a=(Array.isArray(j?.data)?j.data:[])
-      .map(x=>String(x?.symbol||'').toUpperCase().replace(/-USDT$/,''))
-      .filter(x=>/^[A-Z0-9]{2,20}$/.test(x));
-    if(a.length){
-      localStorage.setItem('bingx_contracts_v48',JSON.stringify(a));
-      return [...new Set(a)];
-    }
-   }catch(e){}
-  }
-  try{
-   const cached=JSON.parse(localStorage.getItem('bingx_contracts_v48')||'[]');
-   if(Array.isArray(cached)&&cached.length)return cached;
-  }catch(e){}
-  return [];
- })();
- return contractPromise;
-}
-function fuzzyDistance(a,b){
- a=compact(a);b=compact(b);
- const conf={'I':'L','L':'I','J':'I','N':'U','U':'V','V':'U','O':'Q','Q':'O','S':'5','5':'S','Z':'2','2':'Z','B':'8','8':'B','F':'P'};
- const m=a.length,n=b.length,dp=Array.from({length:m+1},()=>Array(n+1).fill(0));
- for(let i=0;i<=m;i++)dp[i][0]=i;
- for(let j=0;j<=n;j++)dp[0][j]=j;
- for(let i=1;i<=m;i++)for(let j=1;j<=n;j++){
-  const c=a[i-1]===b[j-1]?0:(conf[a[i-1]]===b[j-1]||conf[b[j-1]]===a[i-1] ? .25:1);
-  dp[i][j]=Math.min(dp[i-1][j]+1,dp[i][j-1]+1,dp[i-1][j-1]+c);
- }
- return dp[m][n];
-}
-function symbolVariants(token){
- const t=compact(token), out=[t];
- // OCR frequently adds one leading/trailing glyph in Telegram screenshots:
- // FALLO -> ALLO, ALLOJ -> ALLO, XPLI -> XPL.
- for(let i=0;i<t.length;i++)out.push(t.slice(0,i)+t.slice(i+1));
- if(t.length>4){out.push(t.slice(1));out.push(t.slice(0,-1));}
- return [...new Set(out.filter(x=>x.length>=2))];
-}
-async function resolveSymbol(texts){
- const cs=symbolCandidates(texts);
- if(!cs.length)return null;
- const bs=await contracts();
- const scored=[];
- for(const c of cs){
-  const vars=symbolVariants(c.token);
-  if(bs.length){
-   for(const v of vars){
-    for(const b of bs){
-     if(v===b){
-      let score=(c.kind==='direct'?100:80);
-      if(v===c.token)score+=30;
-      else if(c.token.startsWith(v)||c.token.endsWith(v))score+=18;
-      score-=Math.abs(c.token.length-v.length)*2;
-      scored.push({b,score});
-     }else{
-      const d=fuzzyDistance(v,b);
-      if(d<=1.1 && Math.abs(v.length-b.length)<=1){
-       let score=(c.kind==='direct'?65:55)-d*18-Math.abs(v.length-b.length)*8;
-       if(c.token.startsWith(b)||c.token.endsWith(b))score+=20;
-       scored.push({b,score});
-      }
-     }
-    }
-   }
-  }
- }
- if(scored.length){
-  scored.sort((a,b)=>b.score-a.score||a.b.length-b.b.length||a.b.localeCompare(b.b));
-  return scored[0].b;
- }
- // Offline fallback: choose the most plausible OCR variant. This is deliberately
- // conservative: only remove ONE edge glyph, never arbitrary internal letters.
- const c=cs.find(x=>x.kind==='direct')||cs[0];
- const v=symbolVariants(c.token);
- const edge=v.find(x=>x!==c.token && (c.token.startsWith(x)||c.token.endsWith(x)));
- return edge||c.token;
-}
-function parsePosition(s){const m=String(s).match(/\b(Long|Short)\b/i);return m?m[1][0].toUpperCase()+m[1].slice(1).toLowerCase():null}
-function parseLev(s){const m=String(s).match(/(?:Leverage|Cross|Isolated)[^0-9]{0,25}(\d{1,3})\s*[xX]?/i);return m?.[1]||null}
-function parseEntry(s){const m=String(s).replace(/,/g,'.').match(/\b\d+\.\d{3,}\b/);return m?.[0]||null}
-function timeCandidates(text){
- let s=String(text||'')
-   .replace(/[OoQ]/g,'0')
-   .replace(/[IlL|]/g,'1')
-   .replace(/[Ss]/g,'5')
-   .replace(/[;,\.]/g,':')
-   .replace(/[!]/g,'5');
- const out=[];
- // Accept OCR such as "811:45" (eye icon + 11:45) and keep the final
- // 1-2 hour digits. Also accept spaces around the colon.
- for(const m of s.matchAll(/(\d{1,3})\s*:\s*(\d{2})/g)){
-  let h=String(m[1]),mi=Number(m[2]);
-  if(h.length===3)h=h.slice(-2);
-  const hh=Number(h);
-  if(hh<=23 && mi<=59)out.push(`${String(hh).padStart(2,'0')}:${String(mi).padStart(2,'0')}`);
- }
- return [...new Set(out)];
-}
-function preprocessOCR(canvas, mode='gray', scale=6){
- const w=Math.max(1,Math.round(canvas.width*scale)),h=Math.max(1,Math.round(canvas.height*scale));
- const c=document.createElement('canvas');c.width=w;c.height=h;
- const ctx=c.getContext('2d',{willReadFrequently:true});
- ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
- ctx.drawImage(canvas,0,0,w,h);
- if(mode==='gray'||mode==='threshold'){
-  const img=ctx.getImageData(0,0,w,h),d=img.data;
-  for(let i=0;i<d.length;i+=4){
-   const y=Math.round(.299*d[i]+.587*d[i+1]+.114*d[i+2]);
-   d[i]=d[i+1]=d[i+2]=y;
-  }
-  if(mode==='threshold'){
-   for(let i=0;i<d.length;i+=4){
-    const y=d[i]>=210?255:0;
-    d[i]=d[i+1]=d[i+2]=y;
-   }
-  }
-  ctx.putImageData(img,0,0);
- }
- return c;
-}
-function cropAbsolute(bmp,reg,scale=1){const c=document.createElement('canvas');c.width=Math.max(1,Math.round(reg.w*scale));c.height=Math.max(1,Math.round(reg.h*scale));const x=c.getContext('2d',{willReadFrequently:true});x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';x.drawImage(bmp,reg.x,reg.y,reg.w,reg.h,0,0,c.width,c.height);return c}
-function greenPixel(r,g,b){const mx=Math.max(r,g,b),mn=Math.min(r,g,b),sat=mx?((mx-mn)/mx):0;return g>r+3&&g>b+2&&g>90&&sat>.035}
-async function detectSignalRegion(bmp){
- const W=bmp.width,H=bmp.height,sc=Math.min(1,520/W),w=Math.max(1,Math.round(W*sc)),h=Math.max(1,Math.round(H*sc));
- const c=document.createElement('canvas');c.width=w;c.height=h;const ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(bmp,0,0,w,h);
- const d=ctx.getImageData(0,0,w,h).data,mask=new Uint8Array(w*h);
- for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=(y*w+x)*4,r=d[i],g=d[i+1],b=d[i+2],mx=Math.max(r,g,b),mn=Math.min(r,g,b);mask[y*w+x]=(g>r+3&&g>b+2&&g>90&&((mx-mn)/Math.max(mx,1))>.035)?1:0}
- // Pick the largest CONNECTED green area. A simple global green bounding box is wrong
- // on screenshots of the app because the input fields are also green/dark tinted.
- const seen=new Uint8Array(w*h),qx=new Int32Array(w*h),qy=new Int32Array(w*h);let best=null,bestN=0;
- for(let yy=0;yy<h;yy++)for(let xx=0;xx<w;xx++){const seed=yy*w+xx;if(!mask[seed]||seen[seed])continue;let head=0,tail=0,n=0,minX=xx,maxX=xx,minY=yy,maxY=yy;qx[tail]=xx;qy[tail++]=yy;seen[seed]=1;
-  while(head<tail){const x=qx[head],y=qy[head++];n++;if(x<minX)minX=x;if(x>maxX)maxX=x;if(y<minY)minY=y;if(y>maxY)maxY=y;
-   const pts=[[x-1,y],[x+1,y],[x,y-1],[x,y+1]];for(const [nx,ny] of pts){if(nx<0||ny<0||nx>=w||ny>=h)continue;const j=ny*w+nx;if(mask[j]&&!seen[j]){seen[j]=1;qx[tail]=nx;qy[tail++]=ny}}
-  }
-  const bw=maxX-minX+1,bh=maxY-minY+1;
-  if(n>bestN && bw>w*.45 && bh>h*.25){bestN=n;best={minX,maxX,minY,maxY}}
- }
- if(!best)return{x:0,y:0,w:W,h:H,method:'full-fallback'};
- const padX=Math.max(3,Math.round(W*.008)),padY=Math.max(3,Math.round(H*.006));
- const x=Math.max(0,Math.round(best.minX/sc)-padX),y=Math.max(0,Math.round(best.minY/sc)-padY),r=Math.min(W,Math.round((best.maxX+1)/sc)+padX),b=Math.min(H,Math.round((best.maxY+1)/sc)+padY);
- return{x,y,w:r-x,h:b-y,method:'largest-connected-green'};
-}
-
-async function ocrCanvas(canvas,label,config={},output={text:true}){const w=await getOCRWorker();try{return await w.recognize(canvas,config,output)}catch(e){return await w.recognize(canvas.toDataURL('image/jpeg',.92),config,output)}}
 async function runOCR(){
- if(!imageFile){setStatus('กรุณาเลือกรูปก่อน','error');return}
- $('ocrStatus').textContent='กำลังสแกน V48 — Smart OCR...';
- ['date','entryTime','symbol','entry'].forEach(id=>$(id).value='');
+ if(!currentFile){setStatus('กรุณาเลือกรูป Signal ก่อน','error');return}
+ $('ocrStatus').textContent='กำลังส่งภาพให้ Gemini Vision...';
  try{
-  const bmp=await fileToCanvas(imageFile);
-  const region=await detectSignalRegion(bmp);
-  const signal=cropAbsolute(bmp,region,1);
-  const W=signal.width,H=signal.height;
-
-  // V48 scans only three small zones. This is faster and more reliable on iPhone
-  // than OCRing the whole screenshot, and it avoids reading the webpage UI.
-  const headerBase=cropAbsolute(signal,{x:0,y:H*.05,w:W*.82,h:H*.22},1);
-  const header=preprocessOCR(headerBase,'gray',7);
-  const hr=await ocrCanvas(header,'header',{tessedit_pageseg_mode:'11',tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789#/_ '},{text:true});
-  const headerText=hr.data.text||'';
-
-  // Symbol is taken ONLY from text immediately followed by /USDT.
-  const symbol=await resolveSymbol([headerText]);
-
-  // Date badge has low-contrast text, so use a dedicated high-contrast crop.
-  const dateBase=cropAbsolute(signal,{x:W*.28,y:H*.045,w:W*.58,h:H*.17},1);
-  const dateOCR=preprocessOCR(dateBase,'threshold',10);
-  const dr=await ocrCanvas(dateOCR,'date',{tessedit_pageseg_mode:'11',tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 '},{text:true});
-  const dateText=dr.data.text||'';
-  const date=parseHumanDate(dateText)||parseHumanDate(headerText);
-
-  // Body contains Long/Short, leverage and Entry. It is deliberately cropped
-  // away from the top search bar and the bottom timestamp.
-  const bodyBase=cropAbsolute(signal,{x:0,y:H*.20,w:W*.78,h:H*.58},1);
-  const body=preprocessOCR(bodyBase,'gray',4);
-  const br=await ocrCanvas(body,'body',{tessedit_pageseg_mode:'6'},{text:true});
-  const bodyText=br.data.text||'';
-  const position=parsePosition(bodyText);
-  const lev=parseLev(bodyText);
-  let entry=null;
-  const ei=bodyText.search(/Entry\s+Targets?/i);
-  if(ei>=0)entry=parseEntry(bodyText.slice(ei,ei+160));
-  if(!entry)entry=parseEntry(bodyText);
-
-  // Footer timestamp is tiny/gray. High-threshold + large upscale makes
-  // "11:45" readable; timeCandidates also strips a leading OCR digit such as
-  // "811:45" caused by the eye/viewer count icon.
-  const footerBase=cropAbsolute(signal,{x:W*.40,y:H*.84,w:W*.59,h:H*.16},1);
-  const footer=preprocessOCR(footerBase,'threshold',12);
-  const fr=await ocrCanvas(footer,'footer',{tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789:!'},{text:true});
-  const footerText=fr.data.text||'';
-  const time=timeCandidates(footerText)[0]||null;
-
-  if(date)$('date').value=date;
-  if(time)$('entryTime').value=time;
-  if(symbol)$('symbol').value=symbol;
-  if(position)$('position').value=position;
-  if(lev)$('lev').value=lev;
-  if(entry)$('entry').value=entry;
-
-  $('ocrRaw').textContent=[
-   `V48 REGION ${JSON.stringify(region)}`,
-   `HEADER ${headerText.trim()}`,
-   `DATE ${dateText.trim()}`,
-   `BODY ${bodyText.trim()}`,
-   `FOOTER ${footerText.trim()}`
-  ].join('\n');
-  renderMeta();
-
-  const missing=[];
-  if(!$('date').value)missing.push('วันที่');
-  if(!$('entryTime').value)missing.push('เวลาเข้า');
-  if(!$('symbol').value)missing.push('Symbol');
-  if(!$('position').value)missing.push('Long/Short');
-  if(!$('lev').value)missing.push('Leverage');
-  if(!$('entry').value)missing.push('Entry Price');
-  $('ocrStatus').innerHTML=missing.length
-   ?'<span class="warn">⚠ V48 อ่านได้บางส่วน — ยังขาด: '+missing.join(', ')+'</span>'
-   :'<span class="ok">✓ V48 Smart OCR: '+$('date').value+' '+$('entryTime').value+' | '+$('symbol').value+' | '+$('position').value+' | '+$('lev').value+'x | Entry '+$('entry').value+'</span>';
- }catch(e){
-  console.error(e);
-  $('ocrStatus').innerHTML='<span class="error">OCR error: '+(e?.message||e)+'</span>';
- }
+  const img=await prepareGeminiImage(currentFile); const result=await callGeminiVision(img); const a=applyAIResult(result.data);
+  $('ocrRaw').textContent=`V50 AI VISION\nMODEL: ${$('geminiModel').value}\nRESULT:\n${JSON.stringify(result.data,null,2)}\n\nNORMALIZED:\n${JSON.stringify(a,null,2)}`;
+  const missing=[];if(!a.date)missing.push('วันที่');if(!a.time)missing.push('เวลาเข้า');if(!a.symbol)missing.push('Symbol');if(!a.position)missing.push('Long/Short');if(!a.lev)missing.push('Leverage');if(!a.entry)missing.push('Entry Price');
+  if(missing.length)$('ocrStatus').innerHTML=`<span class="warn">⚠ V50 AI Vision อ่านได้บางส่วน — ยังขาด: ${missing.join(', ')}</span>`;
+  else $('ocrStatus').innerHTML=`<span class="ok">✓ V50 AI Vision: ${a.date} ${a.time} | ${a.symbol} | ${a.position} | ${a.lev}x | Entry ${a.entry}</span>`;
+ }catch(e){console.error(e);$('ocrStatus').innerHTML=`<span class="error">AI Vision error: ${e.message}</span>`;}
 }
-
+$('file').onchange=async e=>{currentFile=e.target.files?.[0]||null;if(!currentFile)return;$('preview').src=URL.createObjectURL(currentFile);$('preview').style.display='block';await runOCR();};
+$('ocrBtn').onclick=runOCR;
 function renderMeta(){
  $('rDate').textContent=$('date').value||'-';$('rTime').textContent=$('entryTime').value||'-';
  $('rSymbol').textContent=$('symbol').value||'-';$('rPos').textContent=$('position').value||'-';
@@ -542,7 +292,7 @@ $('copyBtn').onclick=async()=>{await navigator.clipboard.writeText($('message').
 if('serviceWorker' in navigator){
  window.addEventListener('load',async()=>{
   try{
-   const BUILD='v48';
+   const BUILD='v50';
    if(localStorage.getItem('bingx_build')!==BUILD){
     const regs=await navigator.serviceWorker.getRegistrations();
     await Promise.all(regs.map(r=>r.unregister()));
@@ -554,6 +304,6 @@ if('serviceWorker' in navigator){
   }catch(e){}
  });
 }
-window.addEventListener('load',()=>{getOCRWorker().then(()=>{$('ocrStatus').textContent='OCR พร้อมใช้งาน';}).catch(()=>{});});
+window.addEventListener('load',()=>{$('ocrStatus').textContent='V50 AI Vision พร้อมใช้งาน — ใส่ Gemini API Key แล้วเลือกรูป Signal';});
 </script>
 </body></html>
