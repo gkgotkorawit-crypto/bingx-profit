@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BingX Profit Calculator V50.6 AI VISION ENGINE</title>
+<title>BingX Profit Calculator V52 iOS SIGNAL OCR ENGINE</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0b1118">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -32,21 +32,23 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 <body>
 <div class="wrap">
 <div class="card">
-<h1>⚡ BingX Profit Calculator <span style="font-size:11px;color:#20d19b;border:1px solid #20d19b;border-radius:999px;padding:3px 7px;vertical-align:middle">V50.6 AI VISION ENGINE</span></h1>
-<div class="sub">📱 iPhone / iPad — เพิ่มลงหน้าจอหลักจาก Safari ได้<br>อัปโหลดภาพ Signal → ระบบ OCR ข้อมูลในภาพ → คุณกรอกเฉพาะ LAST PRICE → ระบบค้นหาเวลาแตะราคาแรกหลังเข้าออเดอร์ และคำนวณระยะเวลา</div>
+<h1>⚡ BingX Profit Calculator <span style="font-size:11px;color:#20d19b;border:1px solid #20d19b;border-radius:999px;padding:3px 7px;vertical-align:middle">V52 iOS SIGNAL OCR ENGINE</span></h1>
+<div class="sub">📱 iPhone / iPad — เพิ่มลงหน้าจอหลักจาก Safari ได้<br>อัปโหลดภาพ Signal → ระบบ Signal OCR แยกพื้นที่และตรวจสอบข้อมูล → คุณกรอกเฉพาะ LAST PRICE → ระบบค้นหาเวลาแตะราคาแรกหลังเข้าออเดอร์ และคำนวณระยะเวลา</div>
+</div>
+
+
+<div class="card" style="border-color:#35506b">
+<h2 style="margin:0 0 10px;font-size:18px">📱 ใช้บน iPhone</h2>
+<div class="small" style="line-height:1.7">เปิดด้วย <b>Safari</b> → กดปุ่ม <b>Share</b> → <b>Add to Home Screen / เพิ่มไปยังหน้าจอโฮม</b> → เปิดแอปจากไอคอน BingX Profit</div>
+<div class="small" style="margin-top:8px">V52 ใช้ Local OCR ในเบราว์เซอร์ ไม่ใช้ Gemini และไม่ต้องกรอก API Key — ระบบครอปเฉพาะ Signal + อ่านแต่ละช่องแยกกัน + ตรวจ Symbol กับรายการเหรียญ BingX</div>
 </div>
 
 <div class="card">
-<label>🤖 Gemini Vision</label>
-<div><label>Vision Model</label><select id="geminiModel">
-<option value="gemini-3.8-flash">Gemini 3.8 Flash</option>
-<option value="gemini-3.7-flash">Gemini 3.7 Flash</option>
-<option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
-<option value="gemini-3.6-flash" selected>Gemini 3.6 Flash</option>
-</select></div>
-<div style="margin-top:10px"><label>Gemini API Key</label><input id="geminiKey" type="password" autocomplete="off" placeholder="วาง Gemini API Key ของคุณที่นี่"></div>
-<div class="row" style="margin-top:8px"><button id="saveKeyBtn" class="secondary">💾 บันทึก Key ในเครื่อง</button><button id="clearKeyBtn" class="danger">ล้าง Key</button></div>
-<div class="small" style="margin-top:8px">Key จะเก็บไว้ในเครื่องของคุณด้วย localStorage และใช้ส่งไป Gemini โดยตรง ไม่ฝัง Key ลงในไฟล์</div>
+<label>🔎 Local OCR Scanner</label>
+<div class="small">สแกนภาพในเครื่องด้วย OCR โดยตรง — <b>ไม่ส่งรูปให้ Gemini และไม่ต้องใช้ API Key</b></div>
+<div class="small" style="margin-top:6px">ระบบจะค้นหาพื้นที่ Signal → หา Anchor (Signal Type / Leverage / Entry Targets / USDT) → ครอปอ่านแต่ละช่องแยกกัน → ตรวจ Symbol กับ Contract ของ BingX ก่อนยอมรับค่า</div>
+</div>
+
 </div>
 
 <div class="card">
@@ -68,7 +70,7 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 
 </div>
 <div class="row" style="margin-top:12px">
-<button id="ocrBtn" class="secondary">🔎 อ่านข้อมูลจากรูปอีกครั้ง</button>
+<button id="ocrBtn" class="secondary">🔎 สแกน Signal ใหม่</button>
 <button id="calcBtn" type="button">CALCULATE</button>
 </div>
 <div id="status" class="status">พร้อมใช้งาน</div>
@@ -104,91 +106,69 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 </div>
 </div>
 
-<script>
-const $=id=>document.getElementById(id);
-let imageFile=null, ocrText='', extracted={targets:[]};
-let ocrWorkerPromise=null;
-// ================= GEMINI API KEY =================
-// V50.3: ให้ผู้ใช้กรอก Key บนหน้าเว็บเหมือนเวอร์ชันเดิม
-const GEMINI_KEY_STORAGE='bingx_gemini_api_key';
-const GEMINI_MODEL_STORAGE='bingx_gemini_model';
-const MAX_IMAGE_EDGE=1800;
+<script src="https://cd// ================= V52 iOS SIGNAL OCR ENGINE =================
+const MAX_IMAGE_EDGE=2600;
 let currentFile=null;
-$('geminiModel').value=localStorage.getItem(GEMINI_MODEL_STORAGE)||'gemini-3.6-flash';
-$('geminiModel').onchange=()=>localStorage.setItem(GEMINI_MODEL_STORAGE,$('geminiModel').value);
-$('geminiKey').value=localStorage.getItem(GEMINI_KEY_STORAGE)||'';
-$('saveKeyBtn').onclick=()=>{const k=$('geminiKey').value.trim();if(k){localStorage.setItem(GEMINI_KEY_STORAGE,k);$('ocrStatus').innerHTML='<span class="ok">✓ บันทึก Gemini API Key ในเครื่องแล้ว</span>';}else{localStorage.removeItem(GEMINI_KEY_STORAGE);$('ocrStatus').textContent='ล้าง Gemini API Key แล้ว';}};
-$('clearKeyBtn').onclick=()=>{$('geminiKey').value='';localStorage.removeItem(GEMINI_KEY_STORAGE);$('ocrStatus').textContent='ล้าง Gemini API Key แล้ว';};
-
-function setStatus(msg,type='status'){
- const el=$('status');
- if(!el)return;
- el.className='status '+(type==='error'?'error':type==='ok'?'ok':'');
- el.textContent=msg;
-} 
-function duration(ms){
- if(!Number.isFinite(ms)||ms<0)return '-';
- const total=Math.floor(ms/1000), days=Math.floor(total/86400), hours=Math.floor((total%86400)/3600), mins=Math.floor((total%3600)/60), secs=total%60;
- const parts=[];
- if(days)parts.push(days+'วัน');
- if(hours||days)parts.push(hours+'ชม.');
- if(mins||hours||days)parts.push(mins+'นาที');
- parts.push(secs+'วินาที');
- return parts.join(' ');
-}
+let contractBasesCache=null;
+function setStatus(msg,type='status'){const el=$('status');if(!el)return;el.className='status '+(type==='error'?'error':type==='ok'?'ok':'');el.textContent=msg;}
+function duration(ms){if(!Number.isFinite(ms)||ms<0)return '-';const total=Math.floor(ms/1000),days=Math.floor(total/86400),hours=Math.floor((total%86400)/3600),mins=Math.floor((total%3600)/60),secs=total%60;const p=[];if(days)p.push(days+'วัน');if(hours||days)p.push(hours+'ชม.');if(mins||hours||days)p.push(mins+'นาที');p.push(secs+'วินาที');return p.join(' ')}
 function normalizeDateAI(v){const m=String(v||'').match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);if(!m)return '';const d=new Date(+m[1],+m[2]-1,+m[3]);return d.getFullYear()==+m[1]&&d.getMonth()==+m[2]-1&&d.getDate()==+m[3]?`${m[1]}-${String(+m[2]).padStart(2,'0')}-${String(+m[3]).padStart(2,'0')}`:''}
-function normalizeTimeAI(v){const m=String(v||'').match(/^(\d{1,2}):(\d{2})$/);if(!m)return '';const h=+m[1],mi=+m[2];return h<24&&mi<60?`${String(h).padStart(2,'0')}:${String(mi).padStart(2,'0')}`:''}
+function normalizeTimeAI(v){const m=String(v||'').match(/^(\d{1,2}):(\d{2})$/);if(!m)return '';const h=+m[1],mi=+m[2];return h<24&&mi<60?`${String(h).padStart(2,'0')}:${m[2]}`:''}
 function normalizeSymbolAI(v){let s=String(v||'').toUpperCase().trim().replace(/^#/,'').replace(/[^A-Z0-9]/g,'').replace(/USDT$/,'');return /^[A-Z0-9]{2,20}$/.test(s)?s:''}
 function normalizeEntryAI(v){const m=String(v??'').replace(/,/g,'').match(/\d+(?:\.\d+)?/);return m?m[0]:''}
 function normalizePositionAI(v){const s=String(v||'').toLowerCase();return s.includes('long')?'Long':s.includes('short')?'Short':''}
 function normalizeLevAI(v){const n=Number(String(v||'').replace(/[^0-9.]/g,''));return n>0&&n<=1000?String(n):''}
-async function prepareGeminiImage(file){
- const bmp=await createImageBitmap(file); const scale=Math.min(1,MAX_IMAGE_EDGE/Math.max(bmp.width,bmp.height));
- const c=document.createElement('canvas');c.width=Math.max(1,Math.round(bmp.width*scale));c.height=Math.max(1,Math.round(bmp.height*scale));
- c.getContext('2d',{alpha:false}).drawImage(bmp,0,0,c.width,c.height); bmp.close?.();
- return {mime:'image/jpeg',data:c.toDataURL('image/jpeg',.88).split(',')[1],width:c.width,height:c.height};
+function loadImage(file){return new Promise((resolve,reject)=>{const img=new Image(),u=URL.createObjectURL(file);img.onload=()=>{URL.revokeObjectURL(u);resolve(img)};img.onerror=reject;img.src=u;})}
+function imageCanvas(img){const scale=Math.min(1.9,MAX_IMAGE_EDGE/Math.max(img.naturalWidth,img.naturalHeight));const c=document.createElement('canvas');c.width=Math.max(1,Math.round(img.naturalWidth*scale));c.height=Math.max(1,Math.round(img.naturalHeight*scale));c.getContext('2d').drawImage(img,0,0,c.width,c.height);return c}
+function preprocessCanvas(c,variant=0){const o=document.createElement('canvas');o.width=c.width;o.height=c.height;const ctx=o.getContext('2d',{willReadFrequently:true});ctx.drawImage(c,0,0);if(variant){const im=ctx.getImageData(0,0,o.width,o.height),d=im.data;for(let i=0;i<d.length;i+=4){let g=.299*d[i]+.587*d[i+1]+.114*d[i+2];if(variant===1)g=g>150?255:0;else g=Math.max(0,Math.min(255,(g-128)*2+128));d[i]=d[i+1]=d[i+2]=g;}ctx.putImageData(im,0,0);}return o}
+function cropCanvas(c,x,y,w,h){const X=Math.max(0,Math.floor(x)),Y=Math.max(0,Math.floor(y)),W=Math.min(c.width-X,Math.max(1,Math.floor(w))),H=Math.min(c.height-Y,Math.max(1,Math.floor(h)));const o=document.createElement('canvas');o.width=W;o.height=H;o.getContext('2d').drawImage(c,X,Y,W,H,0,0,W,H);return o}
+async function tess(canvas,psm=6){const r=await Tesseract.recognize(canvas,'eng',{config:{tessedit_pageseg_mode:String(psm)}});return r.data}
+function normWord(w){return String(w||'').toUpperCase().replace(/[^A-Z0-9]/g,'')}
+function anchorsFromData(data){return (data.words||[]).map(w=>({text:String(w.text||''),n:normWord(w.text),x0:w.bbox?.x0||0,y0:w.bbox?.y0||0,x1:w.bbox?.x1||0,y1:w.bbox?.y1||0,conf:Number(w.conf)||0})).filter(w=>w.n)}
+function findAnchor(words,patterns){for(const w of words){if(patterns.some(p=>p.test(w.n)))return w}return null}
+function monthNumber(name){const a=['january','february','march','april','may','june','july','august','september','october','november','december'];const n=String(name).toLowerCase();const i=a.findIndex(x=>n.startsWith(x));return i>=0?i+1:0}
+function parseDateTime(text){let date='';let m=text.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})\b/i);if(m){const y=new Date().getFullYear(),mo=monthNumber(m[1]);date=`${y}-${String(mo).padStart(2,'0')}-${String(+m[2]).padStart(2,'0')}`;}if(!date){m=text.match(/\b(\d{1,2})[\/-](\d{1,2})[\/-](20\d{2})\b/);if(m)date=`${m[3]}-${String(+m[2]).padStart(2,'0')}-${String(+m[1]).padStart(2,'0')}`;}const times=[...text.matchAll(/\b([01]?\d|2[0-3]):([0-5]\d)\b/g)].map(x=>`${String(+x[1]).padStart(2,'0')}:${x[2]}`);return {date,time:times.length?times[times.length-1]:''}}
+function editDistance(a,b){a=a.toUpperCase();b=b.toUpperCase();const d=Array.from({length:b.length+1},(_,i)=>i);for(let i=1;i<=a.length;i++){let prev=d[0];d[0]=i;for(let j=1;j<=b.length;j++){const cur=d[j],cost=a[i-1]===b[j-1]?0:1;d[j]=Math.min(d[j]+1,d[j-1]+1,prev+cost);prev=cur}}return d[b.length]}
+function symbolScore(raw,target){raw=normalizeSymbolAI(raw);target=target.toUpperCase();if(raw===target)return 100;if(raw.length===target.length&&editDistance(raw,target)<=1)return 92;if(raw.includes(target)||target.includes(raw))return 80-Math.abs(raw.length-target.length)*2;return Math.max(0,65-editDistance(raw,target)*12-Math.abs(raw.length-target.length)*3)}
+async function getBingXContracts(){
+ if(contractBasesCache)return contractBasesCache;
+ const origin='https://open-api.bingx.com/openApi/swap/v2/quote/contracts?timestamp='+Date.now();
+ const urls=[
+  {u:origin,h:{'X-SOURCE-KEY':'BX-AI-SKILL'}},
+  {u:'https://open-api.bingx.pro/openApi/swap/v2/quote/contracts?timestamp='+Date.now(),h:{'X-SOURCE-KEY':'BX-AI-SKILL'}},
+  {u:'https://api.allorigins.win/raw?url='+encodeURIComponent(origin),h:{}},
+  {u:'https://corsproxy.io/?url='+encodeURIComponent(origin),h:{}},
+  {u:'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(origin),h:{}},
+  {u:'https://r.jina.ai/'+origin,h:{}}
+ ];
+ for(const item of urls){try{const r=await fetch(item.u,{cache:'no-store',headers:item.h});if(!r.ok)continue;const j=await r.json();const arr=Array.isArray(j.data)?j.data:[];const bases=arr.map(x=>String(x.symbol||'').toUpperCase().replace(/-USDT$/,'')).filter(x=>/^[A-Z0-9]{2,20}$/.test(x));if(bases.length){contractBasesCache=[...new Set(bases)];return contractBasesCache}}catch(e){}}
+ return [];
 }
-const VISION_PROMPT=`You are a precision visual extraction engine for a Telegram crypto trading Signal. Return only the JSON schema. First locate the actual Telegram Signal message inside the uploaded image. The image may be a raw Signal or a screenshot of a web app containing the Signal. IGNORE browser chrome, web-app controls, input fields, old values, filenames, status text and all text outside the Signal.
-
-Extract exactly these fields from the Signal:
-- symbol: the complete base symbol after # and before /USDT. Preserve the first letter. Examples: #APT/USDT => APT; #ALLO/USDT => ALLO; #XPL/USDT => XPL; #UNI/USDT => UNI. Never drop a leading letter and never invent a symbol.
-- date: Telegram date separator such as September 16, converted to YYYY-MM-DD using the current year supplied below. Today/Yesterday are relative to the supplied current date.
-- time: ONLY the small Telegram message timestamp at the bottom-right of the Signal message, HH:MM. Never use device time, browser time or upload time.
-- position: Long or Short from Signal Type.
-- leverage: numeric leverage from Leverage line.
-- entry_price: exact Entry Targets text, preserving trailing zeros such as 0.54640.
-
-Important visual rules: prioritize the actual #SYMBOL/USDT header; prioritize the Telegram date pill/separator; prioritize the tiny footer timestamp near the eye/view count; do not substitute data from the surrounding webpage. If a field is not visually reliable, return an empty string and explain in notes. Do not guess.
-Current local date: ${new Date().toISOString().slice(0,10)}.`;
-function schema(){return {type:'object',properties:{symbol:{type:'string'},date:{type:'string'},time:{type:'string'},position:{type:'string'},leverage:{type:'number'},entry_price:{type:'string'},confidence_symbol:{type:'number'},confidence_date:{type:'number'},confidence_time:{type:'number'},confidence_position:{type:'number'},confidence_leverage:{type:'number'},confidence_entry:{type:'number'},signal_found:{type:'boolean'},notes:{type:'string'}},required:['symbol','date','time','position','leverage','entry_price','confidence_symbol','confidence_date','confidence_time','confidence_position','confidence_leverage','confidence_entry','signal_found','notes']};}
-async function callGeminiVision(img){
- const key=$('geminiKey').value.trim() || localStorage.getItem(GEMINI_KEY_STORAGE) || ''; if(!key)throw new Error('กรุณากรอก Gemini API Key ก่อน');
- const model=$('geminiModel').value; const url=`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
- const body={contents:[{role:'user',parts:[{text:VISION_PROMPT},{inline_data:{mime_type:img.mime,data:img.data}}]}],generationConfig:{temperature:0,responseMimeType:'application/json',responseSchema:schema()}};
- const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},body:JSON.stringify(body)}); const text=await r.text();
- if(!r.ok)throw new Error(`Gemini HTTP ${r.status}: ${text.slice(0,300)}`);
- const j=JSON.parse(text); const raw=j?.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||''; if(!raw)throw new Error('Gemini ไม่ส่งผลลัพธ์');
- let data; try{data=JSON.parse(raw)}catch{const a=raw.indexOf('{'),b=raw.lastIndexOf('}');if(a<0||b<=a)throw new Error('Gemini JSON ไม่ถูกต้อง');data=JSON.parse(raw.slice(a,b+1));}
- return {data,raw,j};
+async function resolveSymbol(rawCandidates){const bases=await getBingXContracts();if(!bases.length)return {symbol:normalizeSymbolAI(rawCandidates[0]||''),verified:false,score:0};let best=null;for(const raw of rawCandidates){const r=normalizeSymbolAI(raw);if(!r)continue;for(const b of bases){const sc=symbolScore(r,b);if(!best||sc>best.score||sc===best.score&&Math.abs(b.length-r.length)<Math.abs(best.symbol.length-r.length))best={symbol:b,score:sc,raw:r}}}return best&&best.score>=80?{symbol:best.symbol,verified:true,score:best.score,raw:best.raw}:{symbol:'',verified:false,score:best?.score||0,raw:best?.raw||''}}
+function collectSymbolCandidates(text){const out=[];const re=/#?([A-Z0-9]{2,20})\s*[\/\\]?\s*USDT/gi;let m;while((m=re.exec(text)))out.push(m[1]);for(const line of text.split(/\n+/)){const mm=line.match(/#?([A-Z]{2,12})\s*$/);if(mm)out.push(mm[1])}return [...new Set(out.map(normalizeSymbolAI).filter(Boolean))]}
+async function signalOCR(file){
+ if(!window.Tesseract)throw new Error('โหลด Local OCR ไม่สำเร็จ — กรุณารีเฟรชหน้าเว็บ');
+ const img=await loadImage(file),base=imageCanvas(img);let best={score:-1,data:null,canvas:null,text:''};
+ for(let v=0;v<3;v++){ $('ocrStatus').textContent=`🔎 ค้นหา Signal และ Anchor ${v+1}/3...`;const c=preprocessCanvas(base,v),d=await tess(c,6),text=d.text||'';const score=(text.match(/USDT/gi)||[]).length*30+(text.match(/SIGNAL/gi)||[]).length*15+(text.match(/LEVERAGE/gi)||[]).length*12+(text.match(/ENTRY/gi)||[]).length*12+Math.min(text.length/100,15);if(score>best.score)best={score,data:d,canvas:c,text}}
+ const words=anchorsFromData(best.data),c=best.canvas,W=c.width,H=c.height;
+ $('ocrStatus').textContent='🔎 ครอปอ่านแต่ละช่องแยกกัน...';
+ const signalAnchor=findAnchor(words,[/^SIGNAL$/, /^TYPE$/]),levAnchor=findAnchor(words,[/^LEVERAGE$/]),entryAnchor=findAnchor(words,[/^ENTRY$/]),usdtWord=words.find(w=>/USDT/.test(w.n));
+ const regions=[];
+ if(usdtWord)regions.push(['symbol',cropCanvas(c,Math.max(0,usdtWord.x0-420),Math.max(0,usdtWord.y0-70),Math.min(650,W),Math.min(180,H))]);
+ if(signalAnchor)regions.push(['position',cropCanvas(c,Math.max(0,signalAnchor.x0-80),Math.max(0,signalAnchor.y0-20),Math.min(750,W),Math.min(160,H))]);
+ if(levAnchor)regions.push(['leverage',cropCanvas(c,Math.max(0,levAnchor.x0-80),Math.max(0,levAnchor.y0-20),Math.min(750,W),Math.min(150,H))]);
+ if(entryAnchor)regions.push(['entry',cropCanvas(c,Math.max(0,entryAnchor.x0-60),Math.max(0,entryAnchor.y0-10),Math.min(700,W),Math.min(190,H))]);
+ regions.push(['datetime',cropCanvas(c,0,Math.floor(H*0.45),W,Math.floor(H*0.55))]);
+ const fieldTexts={symbol:[],position:[],leverage:[],entry:[],datetime:[]};
+ for(const [name,rc] of regions){try{const d=await tess(rc,6);fieldTexts[name].push(d.text||'')}catch(e){}}
+ const combined=[best.text,...Object.values(fieldTexts).flat()].join('\n');$('ocrRaw').textContent='V52 SIGNAL OCR ENGINE\n\n'+combined;
+ const candidates=collectSymbolCandidates([best.text,...fieldTexts.symbol].join('\n')),resolved=await resolveSymbol(candidates);
+ const posText=fieldTexts.position.join('\n')+'\n'+best.text;let position=normalizePositionAI(posText),lev='',entry='',m=(fieldTexts.leverage.join('\n')+'\n'+best.text).match(/(?:LEVERAGE|CROSS)[^\n]{0,40}?([0-9]{1,4})\s*[xX]/i);if(m)lev=m[1];
+ m=(fieldTexts.entry.join('\n')+'\n'+best.text).match(/ENTRY\s*TARGETS?[^\n]{0,50}?(\d+(?:\.\d+)?)/i);if(!m)m=(fieldTexts.entry.join('\n')+'\n'+best.text).match(/\b(0\.\d{2,}|\d+\.\d+)\b/);if(m)entry=m[1];
+ const dt=parseDateTime(fieldTexts.datetime.join('\n')+'\n'+best.text);return {date:normalizeDateAI(dt.date),time:normalizeTimeAI(dt.time),symbol:resolved.symbol,position,lev:normalizeLevAI(lev),entry:normalizeEntryAI(entry),verifiedSymbol:resolved.verified,symbolScore:resolved.score,rawSymbol:candidates[0]||''};
 }
-function applyAIResult(x){
- const date=normalizeDateAI(x.date),time=normalizeTimeAI(x.time),symbol=normalizeSymbolAI(x.symbol),position=normalizePositionAI(x.position),lev=normalizeLevAI(x.leverage),entry=normalizeEntryAI(x.entry_price);
- if(date)$('date').value=date;if(time)$('entryTime').value=time;if(symbol)$('symbol').value=symbol;if(position)$('position').value=position;if(lev)$('lev').value=lev;if(entry)$('entry').value=entry;renderMeta();
- const conf={symbol:Number(x.confidence_symbol||0),date:Number(x.confidence_date||0),time:Number(x.confidence_time||0),position:Number(x.confidence_position||0),leverage:Number(x.confidence_leverage||0),entry:Number(x.confidence_entry||0)};
- return {date,time,symbol,position,lev,entry,conf,notes:String(x.notes||'')};
-}
-async function runOCR(){
- if(!currentFile){setStatus('กรุณาเลือกรูป Signal ก่อน','error');return}
- ['date','entryTime','symbol','entry'].forEach(id=>$(id).value=''); $('lev').value='50'; $('position').value='Short'; renderMeta(); $('out').style.display='none'; $('message').textContent='ยังไม่มีผลลัพธ์';
- $('ocrStatus').textContent='กำลังส่งภาพให้ Gemini Vision...';
- try{
-  const img=await prepareGeminiImage(currentFile); const result=await callGeminiVision(img); const a=applyAIResult(result.data);
-  $('ocrRaw').textContent=`V50.3 AI VISION\nMODEL: ${$('geminiModel').value}\nRESULT:\n${JSON.stringify(result.data,null,2)}\n\nNORMALIZED:\n${JSON.stringify(a,null,2)}`;
-  const missing=[];if(!a.date)missing.push('วันที่');if(!a.time)missing.push('เวลาเข้า');if(!a.symbol)missing.push('Symbol');if(!a.position)missing.push('Long/Short');if(!a.lev)missing.push('Leverage');if(!a.entry)missing.push('Entry Price');
-  if(missing.length)$('ocrStatus').innerHTML=`<span class="warn">⚠ V50 AI Vision อ่านได้บางส่วน — ยังขาด: ${missing.join(', ')}</span>`;
-  else $('ocrStatus').innerHTML=`<span class="ok">✓ V50 AI Vision: ${a.date} ${a.time} | ${a.symbol} | ${a.position} | ${a.lev}x | Entry ${a.entry}</span>`;
- }catch(e){console.error(e);renderMeta();$('ocrStatus').innerHTML=`<span class="error">AI Vision error: ${e.message}</span>`;}
-}
+function applyLocalResult(a){if(a.date)$('date').value=a.date;if(a.time)$('entryTime').value=a.time;if(a.symbol)$('symbol').value=a.symbol;if(a.position)$('position').value=a.position;if(a.lev)$('lev').value=a.lev;if(a.entry)$('entry').value=a.entry;renderMeta();return a}
+async function runOCR(){if(!currentFile){setStatus('กรุณาเลือกรูป Signal ก่อน','error');return}['date','entryTime','symbol','entry'].forEach(id=>$(id).value='');$('lev').value='50';$('position').value='Short';renderMeta();$('out').style.display='none';$('message').textContent='ยังไม่มีผลลัพธ์';try{const a=await signalOCR(currentFile);applyLocalResult(a);const missing=[];if(!a.date)missing.push('วันที่');if(!a.time)missing.push('เวลา');if(!a.symbol)missing.push('Symbol');if(!a.position)missing.push('Long/Short');if(!a.lev)missing.push('Leverage');if(!a.entry)missing.push('Entry Price');if(a.symbol&&!a.verifiedSymbol)missing.push('Symbol ไม่ผ่านการยืนยัน BingX');if(missing.length)$('ocrStatus').innerHTML=`<span class="warn">⚠ V52 อ่านได้บางส่วน — ยังขาด/ไม่ยืนยัน: ${missing.join(', ')}</span>`;else $('ocrStatus').innerHTML=`<span class="ok">✓ V52 Signal OCR: ${a.date} ${a.time} | ${a.symbol} ✓BingX | ${a.position} | ${a.lev}x | Entry ${a.entry}</span>`;}catch(e){console.error(e);$('ocrStatus').innerHTML=`<span class="error">Signal OCR error: ${e.message}</span>`;setStatus('Signal OCR error: '+e.message,'error')}}
 $('file').onchange=async e=>{currentFile=e.target.files?.[0]||null;if(!currentFile)return;$('preview').src=URL.createObjectURL(currentFile);$('preview').style.display='block';await runOCR();};
 $('ocrBtn').onclick=runOCR;
 function renderMeta(){
@@ -307,7 +287,7 @@ $('copyBtn').onclick=async()=>{await navigator.clipboard.writeText($('message').
 if('serviceWorker' in navigator){
  window.addEventListener('load',async()=>{
   try{
-   const BUILD='v50.6';
+   const BUILD='v52';
    if(localStorage.getItem('bingx_build')!==BUILD){
     const regs=await navigator.serviceWorker.getRegistrations();
     await Promise.all(regs.map(r=>r.unregister()));
