@@ -69,7 +69,7 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 </div>
 <div class="row" style="margin-top:12px">
 <button id="ocrBtn" class="secondary">🔎 อ่านข้อมูลจากรูปอีกครั้ง</button>
-<button id="calcBtn">CALCULATE</button>
+<button id="calcBtn" type="button">CALCULATE</button>
 </div>
 <div id="status" class="status">พร้อมใช้งาน</div>
 </div>
@@ -182,7 +182,7 @@ function renderMeta(){
 ['date','entryTime','symbol','position','lev','entry'].forEach(id=>$(id).addEventListener('input',renderMeta));
 const savedProxy=localStorage.getItem('bingx_proxy_url')||''; if($('proxyUrl')){$('proxyUrl').value=savedProxy;$('proxyUrl').addEventListener('change',()=>{const v=$('proxyUrl').value.trim();if(v)localStorage.setItem('bingx_proxy_url',v);else localStorage.removeItem('bingx_proxy_url');});}
 
-async function fetchJSON(url, timeoutMs=12000, headers={}){
+async function fetchJSON(url, timeoutMs=7000, headers={}){
  const ac=new AbortController(); const timer=setTimeout(()=>ac.abort(),timeoutMs);
  try{
    const r=await fetch(url,{method:'GET',mode:'cors',cache:'no-store',signal:ac.signal,headers});
@@ -204,19 +204,17 @@ async function fetchKlines(symbol,startTime,endTime){
  const origin=`https://open-api.bingx.com/openApi/swap/v3/quote/klines?${qs}`;
  const origin2=`https://open-api.bingx.pro/openApi/swap/v3/quote/klines?${qs}`;
  const candidates=[
-   {name:'BingX',url:origin,headers:{'X-SOURCE-KEY':'BX-AI-SKILL'}},
-   {name:'BingX PRO',url:origin2,headers:{'X-SOURCE-KEY':'BX-AI-SKILL'}},
-   {name:'AllOrigins',url:'https://api.allorigins.win/raw?url='+encodeURIComponent(origin)},
-   {name:'CorsProxy',url:'https://corsproxy.io/?url='+encodeURIComponent(origin)},
-   {name:'Jina',url:'https://r.jina.ai/'+origin},
-   {name:'Isomorphic CORS',url:'https://cors.isomorphic-git.org/'+origin},
-   {name:'CodeTabs',url:'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(origin)},
-   {name:'ThingProxy',url:'https://thingproxy.freeboard.io/fetch/'+origin}
+   {name:'BingX',url:origin,headers:{'X-SOURCE-KEY':'BX-AI-SKILL'},timeout:5000},
+   {name:'BingX PRO',url:origin2,headers:{'X-SOURCE-KEY':'BX-AI-SKILL'},timeout:5000},
+   {name:'AllOrigins',url:'https://api.allorigins.win/raw?url='+encodeURIComponent(origin),timeout:7000},
+   {name:'CorsProxy',url:'https://corsproxy.io/?url='+encodeURIComponent(origin),timeout:7000},
+   {name:'CodeTabs',url:'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(origin),timeout:7000},
+   {name:'Jina',url:'https://r.jina.ai/'+origin,timeout:7000}
  ];
  let lastErr=null;
  for(const item of candidates){
    try{
-     const j=await fetchJSON(item.url,12000,item.headers||{});
+     const j=await fetchJSON(item.url,item.timeout||7000,item.headers||{});
      const data=normalizeKlineJSON(j);
      if(data.length)return {ok:true,data,source:item.name};
      throw new Error('ไม่มี K-line');
@@ -225,6 +223,7 @@ async function fetchKlines(symbol,startTime,endTime){
  throw new Error('เชื่อมต่อข้อมูล BingX ไม่สำเร็จจาก GitHub Pages: '+(lastErr?.message||'Load failed'));
 }
 async function calculate(){
+ setStatus('กำลังเริ่มคำนวณและค้นหา BingX...');
  const date=$('date').value,time=$('entryTime').value,symbol=$('symbol').value.trim().toUpperCase().replace(/[-_\\s]?USDT$/,'')+'-USDT';
  const pos=$('position').value, lev=Number($('lev').value), entryText=$('entry').value.trim(), lastText=$('last').value.trim();
  if(!date||!time||!symbol||!entryText||!lastText){setStatus('กรุณาตรวจสอบ Date / Entry Time / Symbol / Entry / Last Price','error');return}
@@ -273,10 +272,10 @@ async function calculate(){
   if(sec===0) sec=Math.floor(Math.random()*60);
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(sec)}`;
 }
-   const touchText=lastHit?formatTouchDateTime(lastHit.t):'ไม่พบ';
+   const touchText=lastHit?formatTouchDateTime(lastHit.t):'ไม่พบ First Touch';
    $('lastTouch').textContent=touchText;
    $('lastDur').textContent=lastHit?duration(lastHit.t-entryTs):'-';
-   $('dataInfo').textContent=`${candles.length} x 1m | ${sourceName||'BingX'}${lastHit?' — พบ First Touch':' — ค้นหาสูงสุด 7 วัน'}`;
+   $('dataInfo').textContent=`${candles.length} x 1m | ${sourceName||'BingX'}${lastHit?' — พบ First Touch':' — ไม่พบ First Touch ภายใน 7 วัน'}`;
    $('out').style.display='block';
 
    // Fixed Profit Card editing prompt requested by the user. Only the values
@@ -285,7 +284,8 @@ async function calculate(){
    $('message').textContent=msg; setStatus('✓ คำนวณเสร็จแล้ว — สร้างข้อความ Profit Card ตามรูปแบบที่กำหนดแล้ว','status');
  }catch(e){setStatus('BingX/API error: '+e.message,'error')}
 }
-$('calcBtn').onclick=calculate;
+$('calcBtn').addEventListener('click',(ev)=>{ev.preventDefault(); calculate().catch(e=>setStatus('เกิดข้อผิดพลาด: '+(e?.message||e),'error'));});
+window.addEventListener('error',e=>setStatus('JavaScript error: '+(e.message||'ไม่ทราบสาเหตุ'),'error'));
 $('copyBtn').onclick=async()=>{await navigator.clipboard.writeText($('message').textContent);setStatus('คัดลอกข้อความแล้ว','status')};
 if('serviceWorker' in navigator){
  window.addEventListener('load',async()=>{
