@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BingX Profit Calculator</title>
+<title>BingX Profit Calculator V23 ULTRAFAST</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0b1118">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -94,6 +94,14 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 <script>
 const $=id=>document.getElementById(id);
 let imageFile=null, ocrText='', extracted={targets:[]};
+let ocrWorkerPromise=null;
+async function getOCRWorker(){
+ if(!ocrWorkerPromise){
+  $('ocrStatus').textContent='กำลังโหลด OCR ครั้งแรก...';
+  ocrWorkerPromise=Tesseract.createWorker('eng',1,{logger:m=>{if(m.status&&m.progress!=null)$('ocrStatus').textContent=`OCR: ${m.status} ${Math.round(m.progress*100)}%`;}});
+ }
+ return await ocrWorkerPromise;
+}
 
 function setStatus(msg,cls='status'){$('status').className=cls;$('status').textContent=msg}
 function fmt(n){return Number(n).toLocaleString('en-US',{maximumFractionDigits:8})}
@@ -135,12 +143,11 @@ async function preprocess(file, mode='normal'){
  ctx.putImageData(im,0,0);
  return c;
 }
-async function ocrCanvas(canvas, label, extraConfig={}){
- const result=await Tesseract.recognize(canvas,'eng',{logger:m=>{
-   if(m.status&&m.progress!=null)$('ocrStatus').textContent=`${label}: ${m.status} ${Math.round(m.progress*100)}%`;
- },...extraConfig});
- return result;
+async function ocrCanvas(canvas,label,extraConfig={}){
+ const worker=await getOCRWorker();
+ return await worker.recognize(canvas,extraConfig,{text:true});
 }
+
 function monthFromText(t){
  const s=(t||'').replace(/[|]/g,'I').replace(/ /g,' ');
  const monthNames='January|February|March|April|May|June|July|August|September|October|November|December';
@@ -187,118 +194,79 @@ function parseOCR(t){
 }
 function monthNum(name){return new Date(Date.parse(name+' 1, 2000')).getMonth()+1}
 
-// V17: Telegram timestamp detector — focus tightly on the lower-right
-// corner of the actual Telegram message bubble.
+// V22: FAST Telegram timestamp detector.
+// The timestamp is in a small, predictable lower-right area of the Telegram bubble.
+// Keep OCR calls to 2 max instead of scanning dozens of overlapping crops.
 async function detectTelegramTime(imageFile){
- const bmp=await createImageBitmap(imageFile), W=bmp.width, H=bmp.height;
- // Telegram message timestamps are tiny, light-gray text at the lower-right of the message bubble.
- // Scan a dense set of overlapping lower-right crops. Never accept 00:00 as a real timestamp.
- const candidates=[];
- for(const fx of [0.45,0.52,0.58,0.64]) for(const fy of [0.70,0.76,0.82]){
-   candidates.push([fx,fy,1-fx,1-fy]);
- }
- const found=[];
- for(let i=0;i<candidates.length;i++){
-  const [fx,fy,fw,fh]=candidates[i];
-  const sx=Math.max(0,Math.floor(W*fx)), sy=Math.max(0,Math.floor(H*fy));
-  const sw=Math.max(30,Math.min(W-sx,Math.floor(W*fw))), sh=Math.max(30,Math.min(H-sy,Math.floor(H*fh)));
-  const base=document.createElement('canvas');
-  const scale=Math.min(8,Math.max(5,1200/sw));
-  base.width=Math.round(sw*scale); base.height=Math.round(sh*scale);
-  base.getContext('2d').drawImage(bmp,sx,sy,sw,sh,0,0,base.width,base.height);
-  const src=base.getContext('2d').getImageData(0,0,base.width,base.height);
-  for(let pass=0;pass<5;pass++){
-   const c=document.createElement('canvas'); c.width=base.width;c.height=base.height;
-   const cx=c.getContext('2d'); const d=new Uint8ClampedArray(src.data);
-   for(let p=0;p<d.length;p+=4){
-     const v=.299*d[p]+.587*d[p+1]+.114*d[p+2];
-     let q=v;
-     if(pass>0) q=v>(pass===1?135:pass===2?155:pass===3?175:195)?255:0;
-     d[p]=d[p+1]=d[p+2]=q;
-   }
-   cx.putImageData(new ImageData(d,base.width,base.height),0,0);
-   for(const psm of ['6','7','11','13']){
-    try{
-     const r=await ocrCanvas(c,`เวลา ${i+1}`,{tessedit_pageseg_mode:psm,tessedit_char_whitelist:'0123456789:.'});
-     const txt=(r.data.text||'').replace(/[OoQ]/g,'0').replace(/[IlL|]/g,'1').replace(/[Ss]/g,'5');
-     for(const m of txt.matchAll(/(?:^|[^0-9])([01]?\d|2[0-3])\s*[:.]\s*([0-5]\d)(?!\d)/g)){
-       const hh=Number(m[1]), mm=Number(m[2]);
-       if(hh===0 && mm===0) continue;
-       found.push(`${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`);
-     }
-    }catch(e){}
-   }
+ const bmp=await createImageBitmap(imageFile),W=bmp.width,H=bmp.height;
+ // One tiny crop only. Telegram's timestamp is near the lower-right of the bubble.
+ const sx=Math.floor(W*0.62),sy=Math.floor(H*0.82),sw=Math.max(140,Math.floor(W*0.30)),sh=Math.max(50,Math.floor(H*0.12));
+ const c=document.createElement('canvas');
+ const scale=Math.min(4,Math.max(2.5,600/sw));
+ c.width=Math.round(sw*scale);c.height=Math.round(sh*scale);
+ const ctx=c.getContext('2d');ctx.drawImage(bmp,sx,sy,sw,sh,0,0,c.width,c.height);
+ try{
+  const r=await ocrCanvas(c,'เวลา Telegram',{tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789:.'});
+  const txt=(r.data.text||'').replace(/[OoQ]/g,'0').replace(/[IlL]/g,'1');
+  for(const m of txt.matchAll(/(?:^|[^0-9])([01]?\d|2[0-3])\s*[:.]\s*([0-5]\d)(?!\d)/g)){
+   const hh=Number(m[1]),mm=Number(m[2]);
+   if(hh===0&&mm===0) continue;
+   return `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
   }
- }
- if(!found.length)return null;
- const counts={}; found.forEach(x=>counts[x]=(counts[x]||0)+1);
- return Object.keys(counts).sort((a,b)=>counts[b]-counts[a])[0] || null;
+ }catch(e){}
+ return null;
 }
+
 async function runOCR(){
  if(!imageFile){setStatus('กรุณาเลือกรูปก่อน','error');return}
- $('ocrStatus').textContent='กำลังเตรียมภาพสำหรับ OCR...';
+ $('ocrStatus').textContent='กำลังอ่านภาพแบบเร็ว...';
  try{
-   const normal=await preprocess(imageFile,'normal');
-   const white=await preprocess(imageFile,'white-text');
-   const r1=await ocrCanvas(normal,'OCR 1/4');
-   const r2=await ocrCanvas(white,'OCR 2/4');
-   let t1=r1.data.text||'', t2=r2.data.text||'';
-   // V13: Telegram's date separator is often attached to the symbol line and is low-contrast.
-   // Locate the detected symbol word, crop around that line, then OCR the blue channel at higher contrast.
-   let dateOCR='';
-   const preliminary=parseOCR([t1,t2].join('\n'));
-   const wanted=preliminary.symbol ? preliminary.symbol.toUpperCase() : null;
-   const words=[...(r1.data.words||[]),...(r2.data.words||[])];
-   const word=words.find(w=>wanted && String(w.text||'').toUpperCase().replace(/[^A-Z0-9]/g,'').includes(wanted.replace(/[^A-Z0-9]/g,'')));
-   const lineCrop=cropAroundWord(normal,word);
-   if(lineCrop){
-     const blue=await preprocessBlueRegion(lineCrop);
-     const r3=await ocrCanvas(blue,'OCR 3/4', {tessedit_pageseg_mode:'6'});
-     dateOCR=r3.data.text||'';
-   }
-   // Fallback: a top/center crop catches Telegram date bubbles when symbol OCR has no bbox.
-   if(!monthFromText(dateOCR)){
-     const bmp=await createImageBitmap(imageFile);
-     const c=document.createElement('canvas');
-     const sx=Math.round(bmp.width*0.35), sy=Math.round(bmp.height*0.08);
-     const sw=Math.round(bmp.width*0.5), sh=Math.round(bmp.height*0.42);
-     c.width=sw; c.height=sh; c.getContext('2d').drawImage(bmp,sx,sy,sw,sh,0,0,sw,sh);
-     const blue=await preprocessBlueRegion(c);
-     const r4=await ocrCanvas(blue,'OCR 4/4',{tessedit_pageseg_mode:'6'});
-     dateOCR=r4.data.text||dateOCR;
-   }
-   ocrText=[t1,t2,dateOCR].filter(Boolean).join('\n');
-   $('ocrRaw').textContent=ocrText;
-   extracted=parseOCR(ocrText);
-   // V15: dedicated Telegram timestamp scan; never use the phone status-bar clock.
-   const telegramTime=await detectTelegramTime(imageFile);
-   // V21: midnight is never a valid OCR fallback for this Telegram timestamp.
-   if(extracted.time==='00:00') extracted.time=null;
-   if(telegramTime) extracted.time=telegramTime;
-   const detectedDate=monthFromText(dateOCR)||monthFromText(ocrText);
-   const year=new Date().getFullYear();
-   if(detectedDate){
-     const mm=String(monthNum(detectedDate.month)).padStart(2,'0'),dd=String(detectedDate.day).padStart(2,'0');
-     $('date').value=`${year}-${mm}-${dd}`;
-   }
-   if(extracted.time)$('entryTime').value=extracted.time;
-   if(extracted.symbol)$('symbol').value=extracted.symbol.toUpperCase();
-   if(extracted.position)$('position').value=/short/i.test(extracted.position)?'Short':'Long';
-   if(extracted.lev)$('lev').value=extracted.lev;
-   if(extracted.entry)$('entry').value=extracted.entry;
-   renderMeta();
-   const missing=[];
-   if(!$('date').value)missing.push('วันที่');
-   if(!$('entryTime').value)missing.push('เวลาเข้า');
-   if(!$('symbol').value)missing.push('Symbol');
-   if(!$('entry').value)missing.push('Entry Price');
-   if(missing.length){
-     $('ocrStatus').innerHTML='<span class="warn">⚠ อ่านได้บางส่วน — ยังขาด: '+missing.join(', ')+'</span>';
-   }else{
-     $('ocrStatus').innerHTML='<span class="ok">✓ อ่านข้อมูลจากรูปสำเร็จ: วันที่ '+$('date').value+' เวลา '+$('entryTime').value+' | '+$('symbol').value+' | '+$('position').value+' | '+$('lev').value+'x | Entry '+$('entry').value+'</span>';
-   }
- }catch(e){$('ocrStatus').innerHTML='<span class="error">OCR error: '+e.message+'</span>'}
+  const bmp=await createImageBitmap(imageFile);
+  const maxW=1500, scale=Math.min(1,maxW/bmp.width);
+  const full=document.createElement('canvas');
+  full.width=Math.round(bmp.width*scale);full.height=Math.round(bmp.height*scale);
+  full.getContext('2d').drawImage(bmp,0,0,full.width,full.height);
+
+  // FAST PATH: one full-image OCR pass for symbol/position/leverage/entry/date.
+  const r=await ocrCanvas(full,'อ่านข้อความ Signal',{tessedit_pageseg_mode:'6'});
+  ocrText=r.data.text||''; $('ocrRaw').textContent=ocrText; extracted=parseOCR(ocrText);
+
+  // Only if date was missed, perform ONE compact date crop.
+  let detectedDate=monthFromText(ocrText);
+  if(!detectedDate){
+   const c=document.createElement('canvas');
+   const sx=Math.round(full.width*0.25),sy=Math.round(full.height*0.04),sw=Math.round(full.width*0.60),sh=Math.round(full.height*0.35);
+   c.width=sw;c.height=sh;c.getContext('2d').drawImage(full,sx,sy,sw,sh,0,0,sw,sh);
+   const rd=await ocrCanvas(c,'อ่านวันที่',{tessedit_pageseg_mode:'6'});
+   const dt=rd.data.text||''; ocrText+='\n'+dt; $('ocrRaw').textContent=ocrText; detectedDate=monthFromText(dt)||monthFromText(ocrText);
+  }
+
+  // ONE tiny timestamp OCR pass. It cannot use the iPhone status-bar clock.
+  const telegramTime=await detectTelegramTime(imageFile);
+  if(extracted.time==='00:00') extracted.time=null;
+  if(telegramTime) extracted.time=telegramTime;
+
+  const year=new Date().getFullYear();
+  if(detectedDate){
+   const mm=String(monthNum(detectedDate.month)).padStart(2,'0'),dd=String(detectedDate.day).padStart(2,'0');
+   $('date').value=`${year}-${mm}-${dd}`;
+  }
+  if(extracted.time)$('entryTime').value=extracted.time;
+  if(extracted.symbol)$('symbol').value=extracted.symbol.toUpperCase();
+  if(extracted.position)$('position').value=/short/i.test(extracted.position)?'Short':'Long';
+  if(extracted.lev)$('lev').value=extracted.lev;
+  if(extracted.entry)$('entry').value=extracted.entry;
+  renderMeta();
+  const missing=[];
+  if(!$('date').value)missing.push('วันที่');
+  if(!$('entryTime').value)missing.push('เวลาเข้า');
+  if(!$('symbol').value)missing.push('Symbol');
+  if(!$('entry').value)missing.push('Entry Price');
+  if(missing.length) $('ocrStatus').innerHTML='<span class="warn">⚠ อ่านได้บางส่วน — ยังขาด: '+missing.join(', ')+'</span>';
+  else $('ocrStatus').innerHTML='<span class="ok">✓ อ่านสำเร็จ: '+$('date').value+' '+$('entryTime').value+' | '+$('symbol').value+' | '+$('position').value+' | '+$('lev').value+'x | Entry '+$('entry').value+'</span>';
+ }catch(e){console.error(e);$('ocrStatus').innerHTML='<span class="error">OCR error: '+(e?.message||e)+'</span>'}
 }
+
 function renderMeta(){
  $('rDate').textContent=$('date').value||'-';$('rTime').textContent=$('entryTime').value||'-';
  $('rSymbol').textContent=$('symbol').value||'-';$('rPos').textContent=$('position').value||'-';
