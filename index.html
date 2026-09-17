@@ -295,6 +295,7 @@ async function fetchKlines(symbol,startTime,endTime){
   for(const base of bases){
     const url=`${base}/openApi/swap/v3/quote/klines?${qs}`;
     const attempts=[
+      {url:`https://api.cors.lol/?url=${encodeURIComponent(url)}`, opts:{method:'GET',cache:'no-store'}},
       {url:`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, opts:{method:'GET',cache:'no-store'}},
       {url, opts:{method:'GET',mode:'cors',cache:'no-store',headers:{'X-SOURCE-KEY':'BX-AI-SKILL'}}},
       {url, opts:{method:'GET',mode:'cors',cache:'no-store'}}
