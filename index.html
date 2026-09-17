@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BingX Profit Calculator V24 INSTANT OCR</title>
+<title>BingX Profit Calculator V25 INSTANT OCR</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0b1118">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -148,11 +148,12 @@ function parseOCR(t){
    ||(s.match(/\b(?:Cross|Isolated)\s*\(?\s*(\d{1,3})\s*[xX]?\s*\)?/i)||[])[1];
  let entry;
  const em=s.match(/Entry\s+Targets?[^\d]{0,120}(\d+\.\d{3,})/i); if(em)entry=em[1];
- let tm=s.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
- if(tm && Number(tm[1])===0 && Number(tm[2])===0) tm=null;
+ let tm=null;
+ const timeHits=[...s.matchAll(/\b([01]?\d|2[0-3])\s*[:.]\s*([0-5]\d)\b/g)];
+ for(const m of timeHits){ const hh=Number(m[1]),mm=Number(m[2]); if(!(hh===0&&mm===0)) tm=m; }
  if(!tm){
-   const compact=s.match(/(?:^|[^0-9])(?:[0-9]\s*)?([01]\d|2[0-3])[:.]([0-5]\d)(?!\d)/);
-   if(compact) { const hh=Number(compact[1]), mm=Number(compact[2]); if(!(hh===0 && mm===0)) tm=[compact[0],compact[1],compact[2]]; }
+   const compactHits=[...s.matchAll(/(?:^|[^0-9])(?:[0-9]\s*)?([01]\d|2[0-3])[:.]([0-5]\d)(?!\d)/g)];
+   for(const m of compactHits){ const hh=Number(m[1]),mm=Number(m[2]); if(!(hh===0&&mm===0)) tm=m; }
  }
  const md=monthFromText(s);
  return {symbol,position,lev,entry,time:tm?tm[0]:null,month:md?md.month:null,day:md?md.day:null};
@@ -193,44 +194,31 @@ async function detectTelegramTime(imageFile){
 
 async function runOCR(){
  if(!imageFile){setStatus('กรุณาเลือกรูปก่อน','error');return}
- $('ocrStatus').textContent='กำลังอ่านภาพแบบเร็วมาก...';
+ $('ocrStatus').textContent='กำลังอ่านภาพแบบเร็ว...';
  try{
   const bmp=await createImageBitmap(imageFile),W=bmp.width,H=bmp.height;
-  // Read only the Telegram message area instead of the whole phone screenshot.
-  // This cuts OCR pixels substantially while retaining date, symbol, entry and timestamp.
-  const sx=Math.floor(W*0.03),sy=Math.floor(H*0.10),sw=Math.floor(W*0.74),sh=Math.floor(H*0.84);
-  const main=document.createElement('canvas');
-  const scale=Math.min(1.8,1800/Math.max(1,sw));
-  main.width=Math.round(sw*scale);main.height=Math.round(sh*scale);
-  main.getContext('2d').drawImage(bmp,sx,sy,sw,sh,0,0,main.width,main.height);
-
-  // Exactly one main OCR pass.
-  const r=await ocrCanvas(main,'อ่านข้อความ Signal',{tessedit_pageseg_mode:'6'});
+  // V25: one OCR pass over the complete signal image. This avoids the repeated
+  // crop/threshold OCR that caused slow scans and also keeps the Telegram
+  // timestamp at the lower-right in the same OCR job as the date and entry.
+  const maxW=1200, scale=Math.min(1, maxW/Math.max(1,W));
+  const c=document.createElement('canvas');
+  c.width=Math.max(1,Math.round(W*scale)); c.height=Math.max(1,Math.round(H*scale));
+  const ctx=c.getContext('2d');
+  ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='medium';
+  ctx.drawImage(bmp,0,0,c.width,c.height);
+  const r=await ocrCanvas(c,'อ่านข้อความ Signal',{tessedit_pageseg_mode:'11'});
   ocrText=r.data.text||''; $('ocrRaw').textContent=ocrText; extracted=parseOCR(ocrText);
 
-  // One tiny timestamp pass only when the main OCR did not produce a valid time.
-  let telegramTime=extracted.time;
-  if(!telegramTime || telegramTime==='00:00') telegramTime=await detectTelegramTime(imageFile);
-  if(telegramTime && telegramTime!=='00:00') extracted.time=telegramTime;
-  else if(extracted.time==='00:00') extracted.time=null;
-
+  // No second OCR pass. If OCR found multiple times (e.g. phone status bar
+  // plus Telegram timestamp), parseOCR intentionally keeps the LAST valid time,
+  // which is the Telegram message time in these Signal screenshots.
   let detectedDate=monthFromText(ocrText);
-  // Only if date was missed, use a compact date-only crop.
-  if(!detectedDate){
-   const c=document.createElement('canvas');
-   const dx=Math.floor(W*0.20),dy=Math.floor(H*0.10),dw=Math.floor(W*0.55),dh=Math.floor(H*0.25);
-   c.width=Math.round(dw*1.5);c.height=Math.round(dh*1.5);
-   c.getContext('2d').drawImage(bmp,dx,dy,dw,dh,0,0,c.width,c.height);
-   const rd=await ocrCanvas(c,'อ่านวันที่',{tessedit_pageseg_mode:'7'});
-   const dt=rd.data.text||''; ocrText+='\n'+dt; $('ocrRaw').textContent=ocrText; detectedDate=monthFromText(dt)||monthFromText(ocrText);
-  }
-
   const year=new Date().getFullYear();
   if(detectedDate){
    const mm=String(monthNum(detectedDate.month)).padStart(2,'0'),dd=String(detectedDate.day).padStart(2,'0');
    $('date').value=`${year}-${mm}-${dd}`;
   }
-  if(extracted.time)$('entryTime').value=extracted.time;
+  if(extracted.time && extracted.time!=='00:00')$('entryTime').value=extracted.time;
   if(extracted.symbol)$('symbol').value=extracted.symbol.toUpperCase();
   if(extracted.position)$('position').value=/short/i.test(extracted.position)?'Short':'Long';
   if(extracted.lev)$('lev').value=extracted.lev;
