@@ -209,7 +209,7 @@ async function readHeaderOCR(original,region){
  const top=Math.max(0,region.y-Math.round(region.h*.02));
  const reg={x:region.x,y:top,w:Math.min(W-region.x,region.w+Math.round(region.w*.38)),h:Math.min(H-top,Math.max(100,Math.round(region.h*.16)))};
  const c=cropAbsolute(original,reg,6);
- const r=await ocrCanvas(c,'v38-header',{tessedit_pageseg_mode:'6'},{text:true,tsv:true});
+ const r=await ocrCanvas(c,'v39-header',{tessedit_pageseg_mode:'6'},{text:true,tsv:true});
  return {canvas:c,text:r.data.text||'',words:parseTSV(r.data.tsv||''),reg};
 }
 function normalizeTodayOCR(t){
@@ -242,8 +242,10 @@ function cropAbsolute(bmp,reg,scale=1){
  ctx.drawImage(bmp,reg.x,reg.y,reg.w,reg.h,0,0,c.width,c.height);return c;
 }
 async function ocrSignalCanvas(signal){
- const c=cropAbsolute(signal,{x:0,y:0,w:signal.w,h:signal.h},Math.min(2.5,1900/signal.w));
- const r=await ocrCanvas(c,'v38-signal',{tessedit_pageseg_mode:'11'},{text:true,tsv:true});
+ const isCanvas=signal && typeof signal.getContext==='function';
+ const c=isCanvas ? cropAbsolute(signal,{x:0,y:0,w:signal.width,h:signal.height},Math.min(2.5,1900/signal.width)) : null;
+ if(!c) throw new Error('Signal region is invalid');
+ const r=await ocrCanvas(c,'v39-signal',{tessedit_pageseg_mode:'11'},{text:true,tsv:true});
  return {canvas:c,text:r.data.text||'',words:parseTSV(r.data.tsv||'')};
 }
 function findSymbolInWords(words){
@@ -263,7 +265,7 @@ async function readDateHeader(original,region,header){
  const right=Math.min(W,left+Math.max(170,Math.round(region.w*.62)));
  const bottom=Math.min(H,top+Math.max(70,Math.round(region.h*.11)));
  const c=cropAbsolute(original,{x:left,y:top,w:right-left,h:bottom-top},10),ctx=c.getContext('2d',{willReadFrequently:true}),base=ctx.getImageData(0,0,c.width,c.height),raw=[];
- for(const th of [230,215,200,0]){const im=new ImageData(new Uint8ClampedArray(base.data),base.width,base.height),p=im.data;if(th)for(let i=0;i<p.length;i+=4){const g=.299*p[i]+.587*p[i+1]+.114*p[i+2];const v=g<th?0:255;p[i]=p[i+1]=p[i+2]=v;}ctx.putImageData(im,0,0);const r=await ocrCanvas(c,'v38-date-'+th,{tessedit_pageseg_mode:'11'},{text:true});const t=r.data.text||'';raw.push(t);const d=semanticDateFromText(t);if(d)return {date:d,raw:raw.join(' | ')};}
+ for(const th of [230,215,200,0]){const im=new ImageData(new Uint8ClampedArray(base.data),base.width,base.height),p=im.data;if(th)for(let i=0;i<p.length;i+=4){const g=.299*p[i]+.587*p[i+1]+.114*p[i+2];const v=g<th?0:255;p[i]=p[i+1]=p[i+2]=v;}ctx.putImageData(im,0,0);const r=await ocrCanvas(c,'v39-date-'+th,{tessedit_pageseg_mode:'11'},{text:true});const t=r.data.text||'';raw.push(t);const d=semanticDateFromText(t);if(d)return {date:d,raw:raw.join(' | ')};}
  return {date:null,raw:[raw0,...raw].filter(Boolean).join(' | ')};
 }
 function normalizeTimeRaw(raw){
@@ -292,7 +294,7 @@ async function readTimeFromBubble(bubble){
    const im=new ImageData(new Uint8ClampedArray(base.data),base.width,base.height),p=im.data;
    if(th)for(let i=0;i<p.length;i+=4){const g=.299*p[i]+.587*p[i+1]+.114*p[i+2];const v=g<th?0:255;p[i]=p[i+1]=p[i+2]=v;}
    ctx.putImageData(im,0,0);
-   const r=await ocrCanvas(c,`v38-time-${wi}-${psm}-${th}`,{tessedit_pageseg_mode:String(psm),tessedit_char_whitelist:'0123456789:'},{text:true});
+   const r=await ocrCanvas(c,`v39-time-${wi}-${psm}-${th}`,{tessedit_pageseg_mode:String(psm),tessedit_char_whitelist:'0123456789:'},{text:true});
    const raw=r.data.text||'';for(const q of strictTimeCandidates(raw))all.push({...q,raw,wi,psm,th});
   }
  }
@@ -304,25 +306,26 @@ async function readEntryFromBubble(bubble,words){
  const W=bubble.width,H=bubble.height;let a=words.find(w=>/^Entry$/i.test((w.text||'').trim()));
  let reg;if(a)reg={x:Math.max(0,a.x-12),y:Math.min(H-1,a.y+a.h*.45),w:Math.min(W-a.x+12,500),h:Math.min(H-(a.y+a.h*.45),150)};
  else reg={x:W*.06,y:H*.28,w:W*.72,h:H*.18};
- const c=cropAbsolute(bubble,reg,7),r=await ocrCanvas(c,'v38-entry',{tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789.'},{text:true});
+ const c=cropAbsolute(bubble,reg,7),r=await ocrCanvas(c,'v39-entry',{tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789.'},{text:true});
  const raw=(r.data.text||'').replace(/,/g,'.');const m=raw.match(/\b\d+\.\d{3,}\b/);return {entry:m?.[0]||null,raw};
 }
 async function runOCR(){
  if(!imageFile){setStatus('กรุณาเลือกรูปก่อน','error');return}
- $('ocrStatus').textContent='กำลังสแกน V38 — หา Signal Bubble → OCR เฉพาะข้อความ → ตรวจวันที่/เวลา...';['date','entryTime','symbol','entry'].forEach(id=>$(id).value='');
+ $('ocrStatus').textContent='กำลังสแกน V39 — หา Signal Bubble → OCR เฉพาะข้อความ → ตรวจวันที่/เวลา...';['date','entryTime','symbol','entry'].forEach(id=>$(id).value='');
  try{
   const bmp=await createImageBitmap(imageFile);
   // 1) Detect the Signal message bubble first. 2) OCR only that bubble.
   // This avoids confusing Safari/iPhone UI with the Telegram message.
   const region=detectWhiteMessageBubble(bmp);
   const bubble=cropAbsolute(bmp,region,1);
-  const main=await ocrSignalCanvas({width:bubble.width,height:bubble.height,x:0,y:0});
+  const main=await ocrSignalCanvas(bubble);
   ocrText=main.text;extracted=parseOCR(main.text);
   const sb=findSymbolInWords(main.words);
   const header=await readHeaderOCR(bmp,region);
   const headerSymbol=findSymbolInWords(header.words);
   if(headerSymbol)extracted.symbol=headerSymbol.symbol; else if(sb)extracted.symbol=sb.symbol;
-  const d=await readDateHeader(bmp,region,header);
+  let d=await readDateHeader(bmp,region,header);
+  if(!d.date && normalizeTodayOCR(main.text)) { const n=todayLocal(); d={date:{y:n.y,m:n.m,d:n.d,label:'Today'},raw:'main OCR → Today'}; }
   const t=await readTimeFromBubble(bubble);
   const e=await readEntryFromBubble(bubble,main.words);
   const parsedToday=d.date?.label==='Today';
@@ -333,9 +336,9 @@ async function runOCR(){
   if(extracted.lev)$('lev').value=extracted.lev;
   if(e.entry)$('entry').value=e.entry;else if(extracted.entry)$('entry').value=extracted.entry;
   const dbg=[`BUBBLE ${region.x},${region.y},${region.w},${region.h} (${region.method})`,`SYMBOL_ANCHOR ${sb?`${sb.symbol} ${sb.x},${sb.y},${sb.w},${sb.h}`:'-'}`,`HEADER ${header.text||'-'}`,`DATE ${d.raw||'-'}`,`DATE_MODE ${parsedToday?'TODAY→DEVICE LOCAL DATE':'MONTH/DAY→MOST RECENT'}`,`TIME ${t.raw||'-'}`,`TIME_TOP ${t.ranking?.map(x=>x.time+'['+x.votes+']').join(', ')||'-'}`,`ENTRY ${e.raw||'-'}`];
-  $('ocrRaw').textContent=ocrText+'\n\n[V38 SIGNAL-BUBBLE-FIRST]\n'+dbg.join('\n');
+  $('ocrRaw').textContent=ocrText+'\n\n[V39 SIGNAL-BUBBLE-FIRST]\n'+dbg.join('\n');
   renderMeta();const missing=[];if(!$('date').value)missing.push('วันที่');if(!$('entryTime').value)missing.push('เวลาเข้า');if(!$('symbol').value)missing.push('Symbol');if(!$('entry').value)missing.push('Entry Price');
-  if(missing.length)$('ocrStatus').innerHTML='<span class="warn">⚠ V38 อ่านได้บางส่วน — ยังขาด: '+missing.join(', ')+'</span>';else $('ocrStatus').innerHTML='<span class="ok">✓ V38 Smart Signal Scan: '+$('date').value+' '+$('entryTime').value+' | '+$('symbol').value+' | '+$('position').value+' | '+$('lev').value+'x | Entry '+$('entry').value+'</span>';
+  if(missing.length)$('ocrStatus').innerHTML='<span class="warn">⚠ V39 อ่านได้บางส่วน — ยังขาด: '+missing.join(', ')+'</span>';else $('ocrStatus').innerHTML='<span class="ok">✓ V39 Smart Signal Scan: '+$('date').value+' '+$('entryTime').value+' | '+$('symbol').value+' | '+$('position').value+' | '+$('lev').value+'x | Entry '+$('entry').value+'</span>';
  }catch(e){console.error(e);$('ocrStatus').innerHTML='<span class="error">OCR error: '+(e?.message||e)+'</span>'}
 }
 function renderMeta(){
