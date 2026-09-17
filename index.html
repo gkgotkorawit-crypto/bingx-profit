@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BingX Profit Calculator V54.3 iOS FAST SMART SIGNAL OCR ENGINE</title>
+<title>BingX Profit Calculator V55 iOS SMART CROP OCR ENGINE</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0b1118">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -32,7 +32,7 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 <body>
 <div class="wrap">
 <div class="card">
-<h1>⚡ BingX Profit Calculator <span style="font-size:11px;color:#20d19b;border:1px solid #20d19b;border-radius:999px;padding:3px 7px;vertical-align:middle">V54.3 iOS FAST SMART SIGNAL OCR ENGINE</span></h1>
+<h1>⚡ BingX Profit Calculator <span style="font-size:11px;color:#20d19b;border:1px solid #20d19b;border-radius:999px;padding:3px 7px;vertical-align:middle">V55 iOS SMART CROP OCR ENGINE</span></h1>
 
 </div>
 
@@ -94,7 +94,7 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 
 <script>
 const $ = (id) => document.getElementById(id);
-// ================= V54.3 iOS FAST SMART SIGNAL OCR ENGINE =================
+// ================= V55 iOS SMART CROP OCR ENGINE =================
 const MAX_IMAGE_EDGE=2200;
 let currentFile=null;
 let contractBasesCache=null;
@@ -164,41 +164,77 @@ async function getBingXContracts(){
 async function resolveSymbol(rawCandidates){const bases=await getBingXContracts();if(!bases.length)return {symbol:normalizeSymbolAI(rawCandidates[0]||''),verified:false,score:0};let best=null;for(const raw of rawCandidates){const r=normalizeSymbolAI(raw);if(!r)continue;for(const b of bases){const sc=symbolScore(r,b);if(!best||sc>best.score||sc===best.score&&Math.abs(b.length-r.length)<Math.abs(best.symbol.length-r.length))best={symbol:b,score:sc,raw:r}}}return best&&best.score>=80?{symbol:best.symbol,verified:true,score:best.score,raw:best.raw}:{symbol:'',verified:false,score:best?.score||0,raw:best?.raw||''}}
 function collectSymbolCandidates(text){const out=[];const re=/#?([A-Z0-9]{2,20})\s*[\/\\]?\s*USDT/gi;let m;while((m=re.exec(text)))out.push(m[1]);for(const line of text.split(/\n+/)){const mm=line.match(/#?([A-Z]{2,12})\s*$/);if(mm)out.push(mm[1])}return [...new Set(out.map(normalizeSymbolAI).filter(Boolean))]}
 function findLightCard(c){
+ // Detect the Telegram white message bubble, not the pale-green chat background.
+ // Work on a small preview for speed, then map the result back to the full canvas.
  const ctx=c.getContext('2d',{willReadFrequently:true});
- const sw=Math.min(c.width,1200), sh=Math.min(c.height,1800);
- const sx=c.width/sw, sy=c.height/sh;
- const data=ctx.getImageData(0,0,c.width,c.height).data;
- // Detect the large white Telegram message card by sampling rows/columns.
- let best={area:0,x:0,y:0,w:c.width,h:c.height};
- const step=Math.max(2,Math.floor(Math.min(c.width,c.height)/500));
- const cols=[];
- for(let y=0;y<c.height;y+=step){
-   let runs=0,start=-1,maxRun=0;
-   for(let x=0;x<c.width;x+=step){
-     const i=(y*c.width+x)*4,r=data[i],g=data[i+1],b=data[i+2];
-     const light=r>205&&g>205&&b>205;
-     if(light){if(start<0)start=x;} else if(start>=0){maxRun=Math.max(maxRun,x-start);start=-1;}
-   }
-   if(start>=0)maxRun=Math.max(maxRun,c.width-start);
-   if(maxRun>c.width*.38) cols.push({y,maxRun});
+ const maxW=700; const sc=Math.min(1,maxW/c.width);
+ const w=Math.max(1,Math.round(c.width*sc)), h=Math.max(1,Math.round(c.height*sc));
+ const tmp=document.createElement('canvas'); tmp.width=w; tmp.height=h;
+ tmp.getContext('2d').drawImage(c,0,0,w,h);
+ const d=tmp.getContext('2d',{willReadFrequently:true}).getImageData(0,0,w,h).data;
+ const mask=new Uint8Array(w*h);
+ for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+   const i=(y*w+x)*4,r=d[i],g=d[i+1],b=d[i+2];
+   const mx=Math.max(r,g,b),mn=Math.min(r,g,b);
+   // Telegram message card is near-white; green chat background is chromatic.
+   mask[y*w+x]=(r>205&&g>205&&b>205&&mx-mn<24)?1:0;
  }
- if(cols.length){
-   let y0=cols[0].y,y1=y0,last=y0;
-   for(const q of cols){
-     if(q.y-last>step*3){
-       const h=last-y0;
-       if(h>c.height*.12){const area=h*Math.max(...cols.filter(z=>z.y>=y0&&z.y<=last).map(z=>z.maxRun));if(area>best.area)best={area,x:0,y:y0,w:c.width,h};}
-       y0=q.y;
+ // Find rows containing a long near-white run. This is much more reliable than
+ // looking for generic "light" pixels in the green background.
+ const rows=[];
+ for(let y=0;y<h;y++){
+   let best=0,run=0;
+   for(let x=0;x<w;x++){
+     if(mask[y*w+x]){run++; if(run>best)best=run;} else run=0;
+   }
+   if(best>w*.28) rows.push({y,best});
+ }
+ if(!rows.length) return null;
+ // Group consecutive white rows; choose the tallest substantial block.
+ const groups=[]; let a=rows[0].y, prev=a;
+ for(let i=1;i<rows.length;i++){
+   if(rows[i].y-prev>3){groups.push([a,prev]);a=rows[i].y;}
+   prev=rows[i].y;
+ }
+ groups.push([a,prev]);
+ let bestG=null,bestArea=0;
+ for(const [y0,y1] of groups){
+   if(y1-y0<Math.max(40,h*.12)) continue;
+   let xmin=w,xmax=0,maxRun=0;
+   for(let y=y0;y<=y1;y++){
+     let run=0,start=0;
+     for(let x=0;x<w;x++){
+       if(mask[y*w+x]){if(!run)start=x;run++;}
+       else {if(run>maxRun){maxRun=run;xmin=Math.min(xmin,start);xmax=Math.max(xmax,start+run);}run=0;}
      }
-     last=q.y;
+     if(run>maxRun){maxRun=run;xmin=Math.min(xmin,start);xmax=Math.max(xmax,start+run);}
    }
-   const h=last-y0;if(h>c.height*.12){const area=h*Math.max(...cols.filter(z=>z.y>=y0&&z.y<=last).map(z=>z.maxRun));if(area>best.area)best={area,x:0,y:y0,w:c.width,h};}
+   const area=(y1-y0)*maxRun;
+   if(area>bestArea && maxRun>w*.28){bestArea=area;bestG={x:xmin,y:y0,w:maxRun,h:y1-y0+1};}
  }
- // Fallback: the signal message is normally the left/center white block.
- if(best.area===0){
-   best={area:1,x:Math.floor(c.width*.05),y:Math.floor(c.height*.08),w:Math.floor(c.width*.72),h:Math.floor(c.height*.82)};
- }
- return cropCanvas(c,best.x,best.y,best.w,best.h);
+ if(!bestG) return null;
+ // Add a small margin so the date pill and timestamp remain available.
+ const mx=Math.round(w*.025), my=Math.round(h*.008);
+ const x=Math.max(0,bestG.x-mx), y=Math.max(0,bestG.y-my);
+ const x2=Math.min(w,bestG.x+bestG.w+Math.round(w*.35));
+ const y2=Math.min(h,bestG.y+bestG.h+Math.round(h*.01));
+ return cropCanvas(c,Math.round(x/sc),Math.round(y/sc),Math.round((x2-x)/sc),Math.round((y2-y)/sc));
+}
+function buildOCRSheet(card){
+ // Build one compact OCR sheet from only the regions that matter.
+ // This avoids a full-card OCR pass and avoids repeated worker calls.
+ const W=card.width,H=card.height;
+ const header=cropCanvas(card,0,0,W,Math.min(H,Math.round(H*.23)));
+ const body=cropCanvas(card,0,Math.round(H*.10),W,Math.min(H*.78,Math.round(H*.80)));
+ const footer=cropCanvas(card,Math.round(W*.52),Math.round(H*.80),Math.round(W*.48),Math.round(H*.20));
+ const scale=2;
+ const hh=Math.max(1,Math.round(header.height*scale)), bh=Math.max(1,Math.round(body.height*scale)), fh=Math.max(1,Math.round(footer.height*scale));
+ const out=document.createElement('canvas'); out.width=Math.max(header.width,body.width,footer.width)*scale; out.height=hh+bh+fh+40;
+ const ctx=out.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,out.width,out.height);
+ ctx.drawImage(header,0,0,out.width,hh);
+ ctx.drawImage(body,0,hh,out.width,bh);
+ ctx.drawImage(footer,0,hh+bh,out.width,fh);
+ return out;
 }
 function cleanOCRText(t){return String(t||'').replace(/\u00a0/g,' ').replace(/[|]/g,'I').replace(/\r/g,'');}
 function inferYearForMonthDay(month,day){
@@ -248,120 +284,51 @@ function pickBestText(arr){return arr.filter(Boolean).sort((a,b)=>{
  return score(b)-score(a);
 })[0]||'';}
 async function signalOCR(file){
- const img=await loadImage(file),base=imageCanvas(img);
- $('ocrStatus').textContent='⚡ เตรียมภาพ...';
+ const img=await loadImage(file);
+ const base=imageCanvas(img);
+ $('ocrStatus').textContent='⚡ กำลังหากล่อง Signal...';
  const card=findLightCard(base);
- if(!card) throw new Error('หา Signal card ไม่พบ');
- const W=card.width,H=card.height;
-
- // FAST SMART PATH:
- // 1) one OCR pass for the message body (symbol/position/leverage/entry/date)
- // 2) only if time is missing, run ONE dedicated timestamp crop.
- // Do not OCR multiple full-card variants.
- $('ocrStatus').textContent='🔎 กำลังอ่าน Signal...';
- let main='';
- try{
-   const d=await ocrFast(card,6,'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:/#()xX×-');
-   main=d.text||'';
- }catch(e){main='';}
-
- // Date is normally in the header beside the symbol. Prefer the main OCR result.
+ if(!card) throw new Error('หา Signal card ไม่พบ — ลองเลือกรูปใหม่');
+ $('ocrStatus').textContent='🔎 อ่านเฉพาะพื้นที่สำคัญ...';
+ const sheet=buildOCRSheet(card);
+ // ONE OCR call for the whole useful information sheet.
+ const data=await tess(preprocessCanvas(sheet,0),6,'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:/#()xX×-/');
+ const main=cleanOCRText(data.text||'');
+ // Date: prioritize the month/day near the header. Time: ONLY accept HH:MM.
  let date=extractDateSmart(main);
- let dateTexts=[];
+ let time=extractTimeCandidatesStrict(main)[0]||'';
+ // If main OCR missed date, use the header slice once more only as a targeted fallback.
+ // If time is missing, do NOT launch a slow full-card retry; use a tiny footer OCR call.
+ let fallbackText=[];
  if(!date){
-   $('ocrStatus').textContent='📅 กำลังอ่านวันที่...';
-   // One focused header crop only.
-   const dr=cropCanvas(card,Math.floor(W*.20),0,Math.floor(W*.80),Math.floor(H*.20));
+   const W=card.width,H=card.height;
+   const dr=upscaleCanvas(cropCanvas(card,0,0,W,Math.round(H*.23)),2.5);
+   try{const d=await tess(dr,7,'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 ,-');fallbackText.push(d.text||'');date=extractDateSmart(d.text||'');}catch(e){}
+ }
+ if(!time){
+   const W=card.width,H=card.height;
+   // Timestamp is at the bottom-right of the message bubble.
+   const tr=cropCanvas(card,Math.round(W*.62),Math.round(H*.82),Math.round(W*.38),Math.round(H*.18));
    try{
-     const d=await tessField(upscaleCanvas(preprocessCanvas(dr,0),2),'date');
-     dateTexts=[d.text||''];
-     date=extractDateSmart(dateTexts[0]);
+     const d=await tess(upscaleCanvas(preprocessTimestamp(tr),3.5),7,'0123456789:');
+     fallbackText.push(d.text||'');
+     const cands=extractTimeCandidatesStrict(d.text||'');
+     if(cands.length)time=cands[0];
    }catch(e){}
  }
-
- // TIME-FIRST-CLASS:
- // The Telegram timestamp is a tiny light-gray HH:MM at the lower-right.
- // Scan specifically for the ':' pattern.  Only one OCR call is made here.
- // Use high-contrast preprocessing because the timestamp is faint.
- $('ocrStatus').textContent='🕐 กำลังค้นหาเวลา HH:MM...';
- let time='',timeTexts=[];
- const timeCrop=cropCanvas(card,
-   Math.floor(W*.68), Math.floor(H*.87),
-   Math.floor(W*.32), Math.max(1,Math.floor(H*.13))
- );
- try{
-   const focused=upscaleCanvas(preprocessTimestamp(timeCrop),4.5);
-   const d=await tess(focused,7,'0123456789:');
-   const tx=d.text||''; timeTexts.push(tx);
-   const cands=extractTimeCandidatesStrict(tx);
-   if(cands.length) time=cands[0];
- }catch(e){}
-
- // If the first timestamp OCR misses, use the main OCR text as a zero-cost fallback.
- if(!time){
-   const c=extractTimeCandidatesStrict(main);
-   if(c.length) time=c[c.length-1];
- }
-
- const combined=[main,...dateTexts,...timeTexts].join('\n');
- $('ocrRaw').textContent=
-   'V54.3 FAST SMART SIGNAL OCR\n\nMAIN OCR:\n'+main+
-   '\n\nDATE FOCUS:\n'+dateTexts.join(' | ')+
-   '\n\nTIME FOCUS (COLON HH:MM):\n'+timeTexts.join(' | ');
-
+ const combined=[main,...fallbackText].join('\n');
+ $('ocrRaw').textContent='V55 SMART CROP OCR\n\nOCR SHEET:\n'+main+'\n\nFALLBACK:\n'+fallbackText.join(' | ');
  const symbolCandidates=extractSymbolSmart(combined);
  let resolved=await resolveSymbol(symbolCandidates);
  if(!resolved.symbol&&symbolCandidates[0])resolved={symbol:symbolCandidates[0],verified:false,score:100,raw:symbolCandidates[0]};
  const position=extractPositionSmart(combined);
  const lev=extractLeverageSmart(combined);
  const entry=extractEntrySmart(combined);
- return {
-   date:normalizeDateAI(date),
-   time:normalizeTimeAI(time),
-   symbol:resolved.symbol,
-   position,
-   lev:normalizeLevAI(lev),
-   entry:normalizeEntryAI(entry),
-   verifiedSymbol:resolved.verified,
-   symbolScore:resolved.score,
-   rawSymbol:resolved.raw||symbolCandidates[0]||''
- };
+ return {date:normalizeDateAI(date),time:normalizeTimeAI(time),symbol:resolved.symbol,position,lev:normalizeLevAI(lev),entry:normalizeEntryAI(entry),verifiedSymbol:resolved.verified,symbolScore:resolved.score,rawSymbol:resolved.raw||symbolCandidates[0]||''};
 }
 
-function preprocessTimestamp(c){
- // Timestamp is often pale gray on white. Make it high-contrast without
- // requiring another full-image OCR pass.
- const o=document.createElement('canvas');
- o.width=c.width;o.height=c.height;
- const ctx=o.getContext('2d',{willReadFrequently:true});
- ctx.drawImage(c,0,0);
- const im=ctx.getImageData(0,0,o.width,o.height),d=im.data;
- for(let i=0;i<d.length;i+=4){
-   const g=.299*d[i]+.587*d[i+1]+.114*d[i+2];
-   // dark text becomes black; everything else becomes white.
-   const v=g<190?0:255;
-   d[i]=d[i+1]=d[i+2]=v;
- }
- ctx.putImageData(im,0,0);
- return o;
-}
-
-function extractTimeCandidatesStrict(text){
- const t=String(text||'')
-   .replace(/[OoQqDd]/g,'0')
-   .replace(/[Il|]/g,'1')
-   .replace(/[Ss]/g,'5')
-   .replace(/[^\d:\s.]/g,' ');
- const out=[];
- // IMPORTANT: require the colon. This prevents iPhone status-bar numbers
- // and price/target numbers from being mistaken for a time.
- for(const m of t.matchAll(/(?:^|\s)([01]?\d|2[0-3])\s*:\s*([0-5]\d)(?=\s|$)/g)){
-   out.push(`${String(+m[1]).padStart(2,'0')}:${m[2]}`);
- }
- return [...new Set(out)];
-}
 function applyLocalResult(a){if(a.date)$('date').value=a.date;if(a.time)$('entryTime').value=a.time;if(a.symbol)$('symbol').value=a.symbol;if(a.position)$('position').value=a.position;if(a.lev)$('lev').value=a.lev;if(a.entry)$('entry').value=a.entry;renderMeta();return a}
-async function runOCR(){if(!currentFile){setStatus('กรุณาเลือกรูป Signal ก่อน','error');return}['date','entryTime','symbol','entry'].forEach(id=>$(id).value='');$('lev').value='50';$('position').value='Short';renderMeta();$('out').style.display='none';$('message').textContent='ยังไม่มีผลลัพธ์';try{const a=await signalOCR(currentFile);applyLocalResult(a);const missing=[];if(!a.date)missing.push('วันที่');if(!a.time)missing.push('เวลา');if(!a.symbol)missing.push('Symbol');if(!a.position)missing.push('Long/Short');if(!a.lev)missing.push('Leverage');if(!a.entry)missing.push('Entry Price');if(a.symbol&&!a.verifiedSymbol){}if(missing.length)$('ocrStatus').innerHTML=`<span class="warn">⚠ V54.3 อ่านได้บางส่วน — ยังขาด/ไม่ยืนยัน: ${missing.join(', ')}</span>`;else $('ocrStatus').innerHTML=`<span class="ok">✓ V54.3 Fast Smart Signal OCR: ${a.date} ${a.time} | ${a.symbol} ✓BingX | ${a.position} | ${a.lev}x | Entry ${a.entry}</span>`;}catch(e){console.error(e);$('ocrStatus').innerHTML=`<span class="error">Signal OCR error: ${e.message}</span>`;setStatus('Signal OCR error: '+e.message,'error')}}
+async function runOCR(){if(!currentFile){setStatus('กรุณาเลือกรูป Signal ก่อน','error');return}['date','entryTime','symbol','entry'].forEach(id=>$(id).value='');$('lev').value='50';$('position').value='Short';renderMeta();$('out').style.display='none';$('message').textContent='ยังไม่มีผลลัพธ์';try{const a=await signalOCR(currentFile);applyLocalResult(a);const missing=[];if(!a.date)missing.push('วันที่');if(!a.time)missing.push('เวลา');if(!a.symbol)missing.push('Symbol');if(!a.position)missing.push('Long/Short');if(!a.lev)missing.push('Leverage');if(!a.entry)missing.push('Entry Price');if(a.symbol&&!a.verifiedSymbol){}if(missing.length)$('ocrStatus').innerHTML=`<span class="warn">⚠ V55 อ่านได้บางส่วน — ยังขาด/ไม่ยืนยัน: ${missing.join(', ')}</span>`;else $('ocrStatus').innerHTML=`<span class="ok">✓ V55 Smart Crop OCR: ${a.date} ${a.time} | ${a.symbol} ✓BingX | ${a.position} | ${a.lev}x | Entry ${a.entry}</span>`;}catch(e){console.error(e);$('ocrStatus').innerHTML=`<span class="error">Signal OCR error: ${e.message}</span>`;setStatus('Signal OCR error: '+e.message,'error')}}
 $('file').onchange=async e=>{currentFile=e.target.files?.[0]||null;if(!currentFile)return;try{if(window.__previewURL)URL.revokeObjectURL(window.__previewURL);window.__previewURL=URL.createObjectURL(currentFile);$('preview').src=window.__previewURL;$('preview').style.display='block';$('ocrStatus').textContent='เลือกรูปแล้ว — เริ่มสแกนอัตโนมัติ...';setStatus('⏳ กำลังเริ่มสแกน Signal...');await runOCR();}catch(err){console.error(err);$('ocrStatus').innerHTML='<span class="error">Signal OCR error: '+(err?.message||err)+'</span>';setStatus('Signal OCR error: '+(err?.message||err),'error');}};
 $('ocrBtn').onclick=async()=>{const b=$('ocrBtn');if(b.dataset.busy==='1')return;b.dataset.busy='1';b.disabled=true;b.textContent='⏳ กำลังสแกน...';try{await runOCR()}finally{b.disabled=false;b.dataset.busy='0';b.textContent='🔎 สแกน Signal ใหม่'}};
 function renderMeta(){
