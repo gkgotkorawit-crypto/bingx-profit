@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BingX Profit Calculator V47 FAST OCR</title>
+<title>BingX Profit Calculator V48 SMART OCR</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0b1118">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -33,7 +33,7 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 <body>
 <div class="wrap">
 <div class="card">
-<h1>⚡ BingX Profit Calculator <span style="font-size:11px;color:#20d19b;border:1px solid #20d19b;border-radius:999px;padding:3px 7px;vertical-align:middle">V47 FAST OCR</span></h1>
+<h1>⚡ BingX Profit Calculator <span style="font-size:11px;color:#20d19b;border:1px solid #20d19b;border-radius:999px;padding:3px 7px;vertical-align:middle">V48 SMART OCR</span></h1>
 <div class="sub">📱 iPhone / iPad — เพิ่มลงหน้าจอหลักจาก Safari ได้<br>อัปโหลดภาพ Signal → ระบบ OCR ข้อมูลในภาพ → คุณกรอกเฉพาะ LAST PRICE → ระบบค้นหาเวลาแตะราคาแรกหลังเข้าออเดอร์ และคำนวณระยะเวลา</div>
 </div>
 
@@ -172,9 +172,16 @@ function parseTSV(tsv){
 }
 function symbolCandidates(texts){
  const out=[];
- for(const raw of texts){const t=normalizeText(raw);
-  for(const m of t.matchAll(/#?\s*([A-Z][A-Z0-9]{1,19})\s*[\/#|JIl1\s]*\s*USDT\b/ig))out.push({token:compact(m[1]),kind:'direct'});
-  for(const m of t.matchAll(/\b([A-Z][A-Z0-9]{1,19})USDT\b/ig))out.push({token:compact(m[1]),kind:'joined'});
+ for(const raw of texts){
+  const t=normalizeText(raw).toUpperCase();
+  // Prefer the token immediately before /USDT. This prevents words from the page
+  // or the app's own input boxes from becoming the symbol.
+  for(const m of t.matchAll(/#?\s*([A-Z][A-Z0-9]{1,19})\s*[/#|JIl1\s]*\s*USDT\b/g)){
+   out.push({token:compact(m[1]),kind:'direct'});
+  }
+  for(const m of t.matchAll(/\b([A-Z][A-Z0-9]{1,19})USDT\b/g)){
+   out.push({token:compact(m[1]),kind:'joined'});
+  }
  }
  return out.filter(x=>x.token.length>=2);
 }
@@ -182,51 +189,138 @@ let contractPromise=null;
 async function contracts(){
  if(contractPromise)return contractPromise;
  contractPromise=(async()=>{
-  for(const host of ['https://open-api.bingx.com','https://open-api.bingx.pro']){try{
-   const r=await fetch(host+'/openApi/swap/v2/quote/contracts?timestamp='+Date.now(),{headers:{'X-SOURCE-KEY':'BX-AI-SKILL'}});if(!r.ok)continue;const j=await r.json();
-   const a=(Array.isArray(j?.data)?j.data:[]).map(x=>String(x?.symbol||'').toUpperCase().replace(/-USDT$/,'')).filter(x=>/^[A-Z0-9]{2,20}$/.test(x));if(a.length)return [...new Set(a)];
-  }catch(e){}}
+  const hosts=['https://open-api.bingx.com','https://open-api.bingx.pro'];
+  const urls=[];
+  for(const host of hosts){
+   const u=host+'/openApi/swap/v2/quote/contracts?timestamp='+Date.now();
+   urls.push({url:u,headers:{'X-SOURCE-KEY':'BX-AI-SKILL'},name:'BingX'});
+   urls.push({url:'https://api.allorigins.win/raw?url='+encodeURIComponent(u),headers:{},name:'AllOrigins'});
+   urls.push({url:'https://corsproxy.io/?url='+encodeURIComponent(u),headers:{},name:'CorsProxy'});
+  }
+  for(const item of urls){
+   try{
+    const r=await fetch(item.url,{cache:'no-store',headers:item.headers||{}});
+    if(!r.ok)continue;
+    const j=await r.json();
+    const a=(Array.isArray(j?.data)?j.data:[])
+      .map(x=>String(x?.symbol||'').toUpperCase().replace(/-USDT$/,''))
+      .filter(x=>/^[A-Z0-9]{2,20}$/.test(x));
+    if(a.length){
+      localStorage.setItem('bingx_contracts_v48',JSON.stringify(a));
+      return [...new Set(a)];
+    }
+   }catch(e){}
+  }
+  try{
+   const cached=JSON.parse(localStorage.getItem('bingx_contracts_v48')||'[]');
+   if(Array.isArray(cached)&&cached.length)return cached;
+  }catch(e){}
   return [];
- })();return contractPromise;
+ })();
+ return contractPromise;
 }
 function fuzzyDistance(a,b){
- a=compact(a);b=compact(b);const conf={'I':'L','L':'I','J':'I','N':'U','U':'V','V':'U','O':'Q','Q':'O','S':'5','5':'S','Z':'2','2':'Z','B':'8','8':'B'};
- const m=a.length,n=b.length,dp=Array.from({length:m+1},()=>Array(n+1).fill(0));for(let i=0;i<=m;i++)dp[i][0]=i;for(let j=0;j<=n;j++)dp[0][j]=j;
- for(let i=1;i<=m;i++)for(let j=1;j<=n;j++){let c=a[i-1]===b[j-1]?0:(conf[a[i-1]]===b[j-1]||conf[b[j-1]]===a[i-1] ? .3:1);dp[i][j]=Math.min(dp[i-1][j]+1,dp[i][j-1]+1,dp[i-1][j-1]+c)}return dp[m][n];
+ a=compact(a);b=compact(b);
+ const conf={'I':'L','L':'I','J':'I','N':'U','U':'V','V':'U','O':'Q','Q':'O','S':'5','5':'S','Z':'2','2':'Z','B':'8','8':'B','F':'P'};
+ const m=a.length,n=b.length,dp=Array.from({length:m+1},()=>Array(n+1).fill(0));
+ for(let i=0;i<=m;i++)dp[i][0]=i;
+ for(let j=0;j<=n;j++)dp[0][j]=j;
+ for(let i=1;i<=m;i++)for(let j=1;j<=n;j++){
+  const c=a[i-1]===b[j-1]?0:(conf[a[i-1]]===b[j-1]||conf[b[j-1]]===a[i-1] ? .25:1);
+  dp[i][j]=Math.min(dp[i-1][j]+1,dp[i][j-1]+1,dp[i-1][j-1]+c);
+ }
+ return dp[m][n];
+}
+function symbolVariants(token){
+ const t=compact(token), out=[t];
+ // OCR frequently adds one leading/trailing glyph in Telegram screenshots:
+ // FALLO -> ALLO, ALLOJ -> ALLO, XPLI -> XPL.
+ for(let i=0;i<t.length;i++)out.push(t.slice(0,i)+t.slice(i+1));
+ if(t.length>4){out.push(t.slice(1));out.push(t.slice(0,-1));}
+ return [...new Set(out.filter(x=>x.length>=2))];
 }
 async function resolveSymbol(texts){
- const cs=symbolCandidates(texts), bs=await contracts(); if(!cs.length)return null; if(!bs.length)return cs[0].token;
+ const cs=symbolCandidates(texts);
+ if(!cs.length)return null;
+ const bs=await contracts();
  const scored=[];
  for(const c of cs){
-  // Strong rule: OCR often appends one stray character (ALLOJ/XPLI). Try every prefix.
-  for(let len=2;len<=Math.min(c.token.length,12);len++){
-   const prefix=c.token.slice(0,len); const exact=bs.filter(b=>b===prefix);
-   for(const b of exact)scored.push({b,score:(c.kind==='direct'?100:80)+len*8+(len===c.token.length?30:0),reason:'exact/prefix'});
-  }
-  for(const b of bs){
-   if(Math.abs(b.length-c.token.length)>2)continue;
-   const d=fuzzyDistance(c.token,b);const sameLen=b.length===c.token.length;
-   const max=sameLen?(b.length<=3?1.5:1.8):1.0;
-   if(d<=max){let score=(c.kind==='direct'?60:50)-d*20-(Math.abs(b.length-c.token.length)*18);if(c.token.startsWith(b))score+=35;scored.push({b,score,reason:'fuzzy'});}
+  const vars=symbolVariants(c.token);
+  if(bs.length){
+   for(const v of vars){
+    for(const b of bs){
+     if(v===b){
+      let score=(c.kind==='direct'?100:80);
+      if(v===c.token)score+=30;
+      else if(c.token.startsWith(v)||c.token.endsWith(v))score+=18;
+      score-=Math.abs(c.token.length-v.length)*2;
+      scored.push({b,score});
+     }else{
+      const d=fuzzyDistance(v,b);
+      if(d<=1.1 && Math.abs(v.length-b.length)<=1){
+       let score=(c.kind==='direct'?65:55)-d*18-Math.abs(v.length-b.length)*8;
+       if(c.token.startsWith(b)||c.token.endsWith(b))score+=20;
+       scored.push({b,score});
+      }
+     }
+    }
+   }
   }
  }
- scored.sort((a,b)=>b.score-a.score||a.b.length-b.b.length||a.b.localeCompare(b.b));
- return scored[0]?.b||null;
+ if(scored.length){
+  scored.sort((a,b)=>b.score-a.score||a.b.length-b.b.length||a.b.localeCompare(b.b));
+  return scored[0].b;
+ }
+ // Offline fallback: choose the most plausible OCR variant. This is deliberately
+ // conservative: only remove ONE edge glyph, never arbitrary internal letters.
+ const c=cs.find(x=>x.kind==='direct')||cs[0];
+ const v=symbolVariants(c.token);
+ const edge=v.find(x=>x!==c.token && (c.token.startsWith(x)||c.token.endsWith(x)));
+ return edge||c.token;
 }
 function parsePosition(s){const m=String(s).match(/\b(Long|Short)\b/i);return m?m[1][0].toUpperCase()+m[1].slice(1).toLowerCase():null}
 function parseLev(s){const m=String(s).match(/(?:Leverage|Cross|Isolated)[^0-9]{0,25}(\d{1,3})\s*[xX]?/i);return m?.[1]||null}
 function parseEntry(s){const m=String(s).replace(/,/g,'.').match(/\b\d+\.\d{3,}\b/);return m?.[0]||null}
 function timeCandidates(text){
- let s=String(text||'').replace(/[OoQ]/g,'0').replace(/[IlL|]/g,'1').replace(/[Ss]/g,'5').replace(/[;,\.]/g,':');
+ let s=String(text||'')
+   .replace(/[OoQ]/g,'0')
+   .replace(/[IlL|]/g,'1')
+   .replace(/[Ss]/g,'5')
+   .replace(/[;,\.]/g,':')
+   .replace(/[!]/g,'5');
  const out=[];
- // Footer OCR commonly turns the final 5 in 11:45 into "!". Treat that
- // character as 5 only in the minute position.
- s=s.replace(/(\d{1,2})\s*:\s*([0-5])!/g,'$1:$2'+'5');
- s=s.replace(/(\d{1,2})\s*:\s*([0-5])[IlL]/g,'$1:$2'+'1');
- for(const m of s.matchAll(/(?:^|[^0-9])(\d{1,2})\s*:\s*([0-5]\d)(?!\d)/g)){const h=+m[1],mi=+m[2];if(h<=23)out.push(`${String(h).padStart(2,'0')}:${String(mi).padStart(2,'0')}`)}
+ // Accept OCR such as "811:45" (eye icon + 11:45) and keep the final
+ // 1-2 hour digits. Also accept spaces around the colon.
+ for(const m of s.matchAll(/(\d{1,3})\s*:\s*(\d{2})/g)){
+  let h=String(m[1]),mi=Number(m[2]);
+  if(h.length===3)h=h.slice(-2);
+  const hh=Number(h);
+  if(hh<=23 && mi<=59)out.push(`${String(hh).padStart(2,'0')}:${String(mi).padStart(2,'0')}`);
+ }
  return [...new Set(out)];
 }
-
+function preprocessOCR(canvas, mode='gray', scale=6){
+ const w=Math.max(1,Math.round(canvas.width*scale)),h=Math.max(1,Math.round(canvas.height*scale));
+ const c=document.createElement('canvas');c.width=w;c.height=h;
+ const ctx=c.getContext('2d',{willReadFrequently:true});
+ ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+ ctx.drawImage(canvas,0,0,w,h);
+ if(mode==='gray'||mode==='threshold'){
+  const img=ctx.getImageData(0,0,w,h),d=img.data;
+  for(let i=0;i<d.length;i+=4){
+   const y=Math.round(.299*d[i]+.587*d[i+1]+.114*d[i+2]);
+   d[i]=d[i+1]=d[i+2]=y;
+  }
+  if(mode==='threshold'){
+   for(let i=0;i<d.length;i+=4){
+    const y=d[i]>=210?255:0;
+    d[i]=d[i+1]=d[i+2]=y;
+   }
+  }
+  ctx.putImageData(img,0,0);
+ }
+ return c;
+}
 function cropAbsolute(bmp,reg,scale=1){const c=document.createElement('canvas');c.width=Math.max(1,Math.round(reg.w*scale));c.height=Math.max(1,Math.round(reg.h*scale));const x=c.getContext('2d',{willReadFrequently:true});x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';x.drawImage(bmp,reg.x,reg.y,reg.w,reg.h,0,0,c.width,c.height);return c}
 function greenPixel(r,g,b){const mx=Math.max(r,g,b),mn=Math.min(r,g,b),sat=mx?((mx-mn)/mx):0;return g>r+3&&g>b+2&&g>90&&sat>.035}
 async function detectSignalRegion(bmp){
@@ -253,28 +347,83 @@ async function detectSignalRegion(bmp){
 async function ocrCanvas(canvas,label,config={},output={text:true}){const w=await getOCRWorker();try{return await w.recognize(canvas,config,output)}catch(e){return await w.recognize(canvas.toDataURL('image/jpeg',.92),config,output)}}
 async function runOCR(){
  if(!imageFile){setStatus('กรุณาเลือกรูปก่อน','error');return}
- $('ocrStatus').textContent='กำลังสแกน V47 — Fast Signal OCR...';['date','entryTime','symbol','entry'].forEach(id=>$(id).value='');
+ $('ocrStatus').textContent='กำลังสแกน V48 — Smart OCR...';
+ ['date','entryTime','symbol','entry'].forEach(id=>$(id).value='');
  try{
-  const bmp=await fileToCanvas(imageFile);const region=await detectSignalRegion(bmp);const signal=cropAbsolute(bmp,region,1);
-  // ONE main OCR pass with TSV. TSV gives text + coordinates, so we do not repeatedly OCR the same image.
-  const main=await ocrCanvas(signal,'main',{tessedit_pageseg_mode:'11'},{text:true,tsv:true});
-  const words=parseTSV(main.data.tsv||'');const text=main.data.text||words.map(w=>w.text).join(' ');
-  // Symbol/date: header only, small and fast. This is the only additional OCR pass.
-  const W=signal.width,H=signal.height;const header=cropAbsolute(signal,{x:0,y:0,w:W*.75,h:H*.23},5);const hr=await ocrCanvas(header,'header',{tessedit_pageseg_mode:'6',tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789#/_ '},{text:true});
+  const bmp=await fileToCanvas(imageFile);
+  const region=await detectSignalRegion(bmp);
+  const signal=cropAbsolute(bmp,region,1);
+  const W=signal.width,H=signal.height;
+
+  // V48 scans only three small zones. This is faster and more reliable on iPhone
+  // than OCRing the whole screenshot, and it avoids reading the webpage UI.
+  const headerBase=cropAbsolute(signal,{x:0,y:H*.05,w:W*.82,h:H*.22},1);
+  const header=preprocessOCR(headerBase,'gray',7);
+  const hr=await ocrCanvas(header,'header',{tessedit_pageseg_mode:'11',tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789#/_ '},{text:true});
   const headerText=hr.data.text||'';
-  const symbol=await resolveSymbol([headerText,text]);
-  const date=parseHumanDate(headerText)||parseHumanDate(text);
-  const position=parsePosition(text),lev=parseLev(text);
-  let entry=null;const ei=text.search(/Entry\s+Targets?/i);if(ei>=0)entry=parseEntry(text.slice(ei,ei+180));if(!entry)entry=parseEntry(text);
-  // Time: use TSV coordinates first, then one narrow footer OCR. This avoids the old fixed crop that could miss 11:45.
-  const bottomWords=words.filter(w=>w.y>H*.76 && w.x>W*.30);const bottomText=bottomWords.map(w=>w.text).join(' ');let times=timeCandidates(bottomText);
-  let footerText='';if(!times.length){const footer=cropAbsolute(signal,{x:W*.20,y:H*.76,w:W*.72,h:H*.22},10);const fr=await ocrCanvas(footer,'footer',{tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789:'},{text:true});footerText=fr.data.text||'';times=timeCandidates(footerText)}
-  const time=times[0]||null;
-  if(date)$('date').value=date;if(time)$('entryTime').value=time;if(symbol)$('symbol').value=symbol;if(position)$('position').value=position;if(lev)$('lev').value=lev;if(entry)$('entry').value=entry;
-  $('ocrRaw').textContent=[`V47 REGION ${JSON.stringify(region)}`,`HEADER ${headerText.trim()}`,`MAIN ${text.trim()}`,`BOTTOM ${bottomText.trim()}`,`FOOTER ${footerText.trim()}`].join('\n');renderMeta();
-  const missing=[];if(!$('date').value)missing.push('วันที่');if(!$('entryTime').value)missing.push('เวลาเข้า');if(!$('symbol').value)missing.push('Symbol');if(!$('position').value)missing.push('Long/Short');if(!$('lev').value)missing.push('Leverage');if(!$('entry').value)missing.push('Entry Price');
-  $('ocrStatus').innerHTML=missing.length?'<span class="warn">⚠ V47 อ่านได้บางส่วน — ยังขาด: '+missing.join(', ')+'</span>':'<span class="ok">✓ V47 Fast OCR: '+$('date').value+' '+$('entryTime').value+' | '+$('symbol').value+' | '+$('position').value+' | '+$('lev').value+'x | Entry '+$('entry').value+'</span>';
- }catch(e){console.error(e);$('ocrStatus').innerHTML='<span class="error">OCR error: '+(e?.message||e)+'</span>'}
+
+  // Symbol is taken ONLY from text immediately followed by /USDT.
+  const symbol=await resolveSymbol([headerText]);
+
+  // Date badge has low-contrast text, so use a dedicated high-contrast crop.
+  const dateBase=cropAbsolute(signal,{x:W*.28,y:H*.045,w:W*.58,h:H*.17},1);
+  const dateOCR=preprocessOCR(dateBase,'threshold',10);
+  const dr=await ocrCanvas(dateOCR,'date',{tessedit_pageseg_mode:'11',tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 '},{text:true});
+  const dateText=dr.data.text||'';
+  const date=parseHumanDate(dateText)||parseHumanDate(headerText);
+
+  // Body contains Long/Short, leverage and Entry. It is deliberately cropped
+  // away from the top search bar and the bottom timestamp.
+  const bodyBase=cropAbsolute(signal,{x:0,y:H*.20,w:W*.78,h:H*.58},1);
+  const body=preprocessOCR(bodyBase,'gray',4);
+  const br=await ocrCanvas(body,'body',{tessedit_pageseg_mode:'6'},{text:true});
+  const bodyText=br.data.text||'';
+  const position=parsePosition(bodyText);
+  const lev=parseLev(bodyText);
+  let entry=null;
+  const ei=bodyText.search(/Entry\s+Targets?/i);
+  if(ei>=0)entry=parseEntry(bodyText.slice(ei,ei+160));
+  if(!entry)entry=parseEntry(bodyText);
+
+  // Footer timestamp is tiny/gray. High-threshold + large upscale makes
+  // "11:45" readable; timeCandidates also strips a leading OCR digit such as
+  // "811:45" caused by the eye/viewer count icon.
+  const footerBase=cropAbsolute(signal,{x:W*.40,y:H*.84,w:W*.59,h:H*.16},1);
+  const footer=preprocessOCR(footerBase,'threshold',12);
+  const fr=await ocrCanvas(footer,'footer',{tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789:!'},{text:true});
+  const footerText=fr.data.text||'';
+  const time=timeCandidates(footerText)[0]||null;
+
+  if(date)$('date').value=date;
+  if(time)$('entryTime').value=time;
+  if(symbol)$('symbol').value=symbol;
+  if(position)$('position').value=position;
+  if(lev)$('lev').value=lev;
+  if(entry)$('entry').value=entry;
+
+  $('ocrRaw').textContent=[
+   `V48 REGION ${JSON.stringify(region)}`,
+   `HEADER ${headerText.trim()}`,
+   `DATE ${dateText.trim()}`,
+   `BODY ${bodyText.trim()}`,
+   `FOOTER ${footerText.trim()}`
+  ].join('\n');
+  renderMeta();
+
+  const missing=[];
+  if(!$('date').value)missing.push('วันที่');
+  if(!$('entryTime').value)missing.push('เวลาเข้า');
+  if(!$('symbol').value)missing.push('Symbol');
+  if(!$('position').value)missing.push('Long/Short');
+  if(!$('lev').value)missing.push('Leverage');
+  if(!$('entry').value)missing.push('Entry Price');
+  $('ocrStatus').innerHTML=missing.length
+   ?'<span class="warn">⚠ V48 อ่านได้บางส่วน — ยังขาด: '+missing.join(', ')+'</span>'
+   :'<span class="ok">✓ V48 Smart OCR: '+$('date').value+' '+$('entryTime').value+' | '+$('symbol').value+' | '+$('position').value+' | '+$('lev').value+'x | Entry '+$('entry').value+'</span>';
+ }catch(e){
+  console.error(e);
+  $('ocrStatus').innerHTML='<span class="error">OCR error: '+(e?.message||e)+'</span>';
+ }
 }
 
 function renderMeta(){
@@ -390,7 +539,21 @@ async function calculate(){
 }
 $('calcBtn').onclick=calculate;
 $('copyBtn').onclick=async()=>{await navigator.clipboard.writeText($('message').textContent);setStatus('คัดลอกข้อความแล้ว','status')};
-if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));}
+if('serviceWorker' in navigator){
+ window.addEventListener('load',async()=>{
+  try{
+   const BUILD='v48';
+   if(localStorage.getItem('bingx_build')!==BUILD){
+    const regs=await navigator.serviceWorker.getRegistrations();
+    await Promise.all(regs.map(r=>r.unregister()));
+    const keys=await caches.keys();
+    await Promise.all(keys.filter(k=>k.startsWith('bingx-profit-')&&k!==('bingx-profit-'+BUILD)).map(k=>caches.delete(k)));
+    localStorage.setItem('bingx_build',BUILD);
+   }
+   await navigator.serviceWorker.register('./sw.js');
+  }catch(e){}
+ });
+}
 window.addEventListener('load',()=>{getOCRWorker().then(()=>{$('ocrStatus').textContent='OCR พร้อมใช้งาน';}).catch(()=>{});});
 </script>
 </body></html>
