@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BingX Profit Calculator V40 SIGNAL LOCK OCR</title>
+<title>BingX Profit Calculator V46 iOS OCR</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0b1118">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -33,7 +33,7 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 <body>
 <div class="wrap">
 <div class="card">
-<h1>⚡ BingX Profit Calculator</h1>
+<h1>⚡ BingX Profit Calculator <span style="font-size:11px;color:#20d19b;border:1px solid #20d19b;border-radius:999px;padding:3px 7px;vertical-align:middle">V46 iOS OCR</span></h1>
 <div class="sub">📱 iPhone / iPad — เพิ่มลงหน้าจอหลักจาก Safari ได้<br>อัปโหลดภาพ Signal → ระบบ OCR ข้อมูลในภาพ → คุณกรอกเฉพาะ LAST PRICE → ระบบค้นหาเวลาแตะราคาแรกหลังเข้าออเดอร์ และคำนวณระยะเวลา</div>
 </div>
 
@@ -121,16 +121,26 @@ $('file').onchange=async e=>{
 };
 $('ocrBtn').onclick=()=>runOCR();
 
-async function preprocess(file, mode='normal'){
- const bmp=await createImageBitmap(file);
- const scale=Math.min(1.8,1800/bmp.width);
- const c=document.createElement('canvas');c.width=Math.max(1,Math.round(bmp.width*scale));c.height=Math.max(1,Math.round(bmp.height*scale));
- const ctx=c.getContext('2d',{willReadFrequently:true});ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.drawImage(bmp,0,0,c.width,c.height);
- return c;
+async function fileToCanvas(file){
+ return await new Promise((resolve,reject)=>{
+  const url=URL.createObjectURL(file),img=new Image();
+  img.onload=()=>{try{const maxW=1800,scale=Math.min(1,maxW/img.naturalWidth);const c=document.createElement('canvas');c.width=Math.max(1,Math.round(img.naturalWidth*scale));c.height=Math.max(1,Math.round(img.naturalHeight*scale));const ctx=c.getContext('2d',{willReadFrequently:true});ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(url);resolve(c)}catch(e){URL.revokeObjectURL(url);reject(e)}};
+  img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error('iPhone อ่านไฟล์ภาพไม่ได้'))};img.src=url;
+ });
 }
 async function ocrCanvas(canvas,label,extraConfig={},output={text:true}){
  const worker=await getOCRWorker();
- return await worker.recognize(canvas,extraConfig,output);
+ // iOS Safari can fail when Tesseract receives an ImageBitmap directly.
+ // Always give it a normal HTMLCanvasElement; if that still fails, retry with a data URL.
+ let source=canvas;
+ if(!(source instanceof HTMLCanvasElement)){
+  const c=document.createElement('canvas');c.width=source.width;c.height=source.height;c.getContext('2d').drawImage(source,0,0);source=c;
+ }
+ try{return await worker.recognize(source,extraConfig,output)}
+ catch(e){
+  try{return await worker.recognize(source.toDataURL('image/jpeg',0.92),extraConfig,output)}
+  catch(e2){throw new Error((e2&&e2.message)||e.message||'Tesseract อ่านภาพไม่ได้')}
+ }
 }
 function levenshtein(a,b){
  const m=a.length,n=b.length;if(!m)return n;if(!n)return m;
@@ -330,10 +340,16 @@ async function resolveAuthoritativeSymbol(texts){
     for(const b of bases){
       const d=symbolDistance(c.token,b);
       const maxD=b.length<=3?1.9:(b.length<=5?1.6:2.2);
-      if(d<=maxD) scored.push({symbol:b,d,kind:c.kind,token:c.token,score:(c.kind==='direct'?3:2)-d});
+      if(d<=maxD){
+        const prefix=c.token.startsWith(b)?1.8:0;
+        const suffix=c.token.endsWith(b)?1.2:0;
+        const lenPenalty=Math.abs(c.token.length-b.length)*0.18;
+        const exact=b===c.token?3.5:0;
+        scored.push({symbol:b,d,kind:c.kind,token:c.token,score:(c.kind==='direct'?3:2)-d+prefix+suffix+exact-lenPenalty});
+      }
     }
   }
-  scored.sort((a,b)=>b.score-a.score||a.d-b.d||b.symbol.length-a.symbol.length);
+  scored.sort((a,b)=>b.score-a.score||a.d-b.d||Math.abs(a.symbol.length-a.token.length)-Math.abs(b.symbol.length-b.token.length)||a.symbol.localeCompare(b.symbol));
   return scored[0]?.symbol||exact?.token||null;
 }
 async function readSignalFields(signal,fullText=''){ 
@@ -382,9 +398,9 @@ async function readSignalFields(signal,fullText=''){
 }
 async function runOCR(){
  if(!imageFile){setStatus('กรุณาเลือกรูปก่อน','error');return}
- $('ocrStatus').textContent='กำลังสแกน V45 — Full Signal OCR...';['date','entryTime','symbol','entry'].forEach(id=>$(id).value='');
+ $('ocrStatus').textContent='กำลังสแกน V46 — iOS-safe Full Signal OCR...';['date','entryTime','symbol','entry'].forEach(id=>$(id).value='');
  try{
-  const bmp=await createImageBitmap(imageFile);
+  const bmp=await fileToCanvas(imageFile);
   // One full OCR pass is the anchor for Symbol/Date. It reliably sees #COIN/USDT
   // even when the green Signal wallpaper confuses a local crop.
   const full=await ocrCanvas(bmp,'full-signal',{tessedit_pageseg_mode:'11'},{text:true});
@@ -396,7 +412,7 @@ async function runOCR(){
   const dbg=[`REGION ${region.x},${region.y},${region.w},${region.h} (${region.method})`,`FULL ${JSON.stringify(f.debug.full)}`,`HEADER ${JSON.stringify(f.debug.header)}`,`BODY ${JSON.stringify(f.debug.body)}`,`ENTRY ${JSON.stringify(f.debug.entry)}`,`TIME ${JSON.stringify(f.debug.time)}`,`TIME_VOTES ${JSON.stringify(f.debug.timeVotes)}`];
   $('ocrRaw').textContent=dbg.join('\n');renderMeta();
   const missing=[];if(!$('date').value)missing.push('วันที่');if(!$('entryTime').value)missing.push('เวลาเข้า');if(!$('symbol').value)missing.push('Symbol');if(!$('position').value)missing.push('Long/Short');if(!$('lev').value)missing.push('Leverage');if(!$('entry').value)missing.push('Entry Price');
-  if(missing.length)$('ocrStatus').innerHTML='<span class="warn">⚠ V45 อ่านได้บางส่วน — ยังขาด: '+missing.join(', ')+'</span>';else $('ocrStatus').innerHTML='<span class="ok">✓ V45 Full Signal OCR: '+$('date').value+' '+$('entryTime').value+' | '+$('symbol').value+' | '+$('position').value+' | '+$('lev').value+'x | Entry '+$('entry').value+'</span>';
+  if(missing.length)$('ocrStatus').innerHTML='<span class="warn">⚠ V46 อ่านได้บางส่วน — ยังขาด: '+missing.join(', ')+'</span>';else $('ocrStatus').innerHTML='<span class="ok">✓ V46 iOS Full Signal OCR: '+$('date').value+' '+$('entryTime').value+' | '+$('symbol').value+' | '+$('position').value+' | '+$('lev').value+'x | Entry '+$('entry').value+'</span>';
  }catch(e){console.error(e);$('ocrStatus').innerHTML='<span class="error">OCR error: '+(e?.message||e)+'</span>'}
 }
 
