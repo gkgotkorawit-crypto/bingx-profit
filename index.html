@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BingX Profit Calculator V28 DATEFIX</title>
+<title>BingX Profit Calculator V31 GITHUB</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0b1118">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -53,6 +53,7 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 <div><label>Leverage</label><input id="lev" type="number" value="50" min="1"></div>
 <div><label>Entry Price</label><input id="entry" inputmode="decimal"></div>
 <div class="full"><label>LAST PRICE <b style="color:#20d19b">(กรอกเอง)</b></label><input id="last" inputmode="decimal" placeholder="เช่น 0.079860"></div>
+
 </div>
 <div class="row" style="margin-top:12px">
 <button id="ocrBtn" class="secondary">🔎 อ่านข้อมูลจากรูปอีกครั้ง</button>
@@ -191,26 +192,28 @@ function monthNum(name){return new Date(Date.parse(name+' 1, 2000')).getMonth()+
 // V24: one small, deterministic timestamp crop. No multi-threshold scanning.
 async function detectTelegramTime(imageFile){
  const bmp=await createImageBitmap(imageFile),W=bmp.width,H=bmp.height;
- // Signal screenshots used by this app place the Telegram timestamp in the lower-right
- // of the message bubble. Keep the crop tiny for iPhone speed.
- const sx=Math.floor(W*0.44), sy=Math.floor(H*0.84), sw=Math.floor(W*0.31), sh=Math.floor(H*0.12);
+ // Tight crop: Telegram message timestamp is at the bottom-right edge of the
+ // white message bubble. Keeping the crop narrow prevents OCR from inventing
+ // a time from other text/UI elements.
+ const sx=Math.floor(W*0.47), sy=Math.floor(H*0.875), sw=Math.floor(W*0.19), sh=Math.floor(H*0.10);
  const c=document.createElement('canvas');
- const scale=Math.min(5,Math.max(3.5,700/Math.max(1,sw)));
+ const scale=Math.min(8,Math.max(5,1000/Math.max(1,sw)));
  c.width=Math.round(sw*scale); c.height=Math.round(sh*scale);
- const ctx=c.getContext('2d');ctx.drawImage(bmp,sx,sy,sw,sh,0,0,c.width,c.height);
- // Isolate low-saturation/light Telegram timestamp glyphs from the green background.
+ const ctx=c.getContext('2d');ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+ ctx.drawImage(bmp,sx,sy,sw,sh,0,0,c.width,c.height);
  const im=ctx.getImageData(0,0,c.width,c.height),d=im.data;
+ // Keep pale/gray timestamp pixels; suppress the green Telegram background.
  for(let i=0;i<d.length;i+=4){
-   const r=d[i],g=d[i+1],b=d[i+2];
-   const mx=Math.max(r,g,b),mn=Math.min(r,g,b),sat=mx?((mx-mn)/mx):1;
-   const white = mx>105 && sat<0.32;
-   const v=white?255:0; d[i]=d[i+1]=d[i+2]=v;
+   const r=d[i],g=d[i+1],b=d[i+2],mx=Math.max(r,g,b),mn=Math.min(r,g,b);
+   const sat=mx?((mx-mn)/mx):1,gray=0.299*r+0.587*g+0.114*b;
+   const keep=(gray>105 && sat<0.18) || (gray>145 && sat<0.30);
+   const v=keep?255:0;d[i]=d[i+1]=d[i+2]=v;
  }
  ctx.putImageData(im,0,0);
  try{
    const r=await ocrCanvas(c,'เวลา Telegram',{tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789:'});
-   const txt=(r.data.text||'').replace(/[OoQ]/g,'0').replace(/[IlL]/g,'1');
-   const hits=[...txt.matchAll(/(?:^|[^0-9])([01]?\d|2[0-3])\s*[:.]\s*([0-5]\d)(?!\d)/g)];
+   const txt=(r.data.text||'').replace(/[OoQ]/g,'0').replace(/[IlL]/g,'1').replace(/[;,.]/g,':');
+   const hits=[...txt.matchAll(/(?:^|[^0-9])([01]?\d|2[0-3])\s*:\s*([0-5]\d)(?!\d)/g)];
    for(const m of hits){
      const hh=Number(m[1]),mm=Number(m[2]);
      if(hh===0&&mm===0) continue;
@@ -219,7 +222,6 @@ async function detectTelegramTime(imageFile){
  }catch(e){}
  return null;
 }
-
 async function detectTelegramDateFast(imageFile){
  const bmp=await createImageBitmap(imageFile),W=bmp.width,H=bmp.height;
  // Telegram's date separator is normally in the upper 5–22% of the Signal image.
@@ -258,33 +260,32 @@ async function detectTelegramDateFast(imageFile){
 async function runOCR(){
  if(!imageFile){setStatus('กรุณาเลือกรูปก่อน','error');return}
  $('ocrStatus').textContent='กำลังอ่านภาพแบบเร็ว...';
+ // Never carry an old OCR time/symbol/entry into a new image.
+ ['date','entryTime','symbol','entry'].forEach(id=>$(id).value='');
  try{
   const bmp=await createImageBitmap(imageFile),W=bmp.width,H=bmp.height;
-  // V26: one OCR pass over the complete signal image. This avoids the repeated
-  // crop/threshold OCR that caused slow scans and also keeps the Telegram
-  // timestamp at the lower-right in the same OCR job as the date and entry.
   const maxW=1200, scale=Math.min(1, maxW/Math.max(1,W));
   const c=document.createElement('canvas');
   c.width=Math.max(1,Math.round(W*scale)); c.height=Math.max(1,Math.round(H*scale));
-  const ctx=c.getContext('2d');
-  ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='medium';
+  const ctx=c.getContext('2d');ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='medium';
   ctx.drawImage(bmp,0,0,c.width,c.height);
   const r=await ocrCanvas(c,'อ่านข้อความ Signal',{tessedit_pageseg_mode:'11'});
   ocrText=r.data.text||''; $('ocrRaw').textContent=ocrText; extracted=parseOCR(ocrText);
 
-  // No second OCR pass. If OCR found multiple times (e.g. phone status bar
-  // plus Telegram timestamp), parseOCR intentionally keeps the LAST valid time,
-  // which is the Telegram message time in these Signal screenshots.
+  // IMPORTANT: the full-page OCR can confuse the iPhone status-bar time or
+  // previous UI text with Telegram's message time. The dedicated timestamp
+  // crop is therefore authoritative and always runs for every new image.
+  const detectedTime=await detectTelegramTime(imageFile);
+  if(detectedTime) extracted.time=detectedTime;
+
   let detectedDate=monthFromText(ocrText);
-  // If the full-image OCR misses Telegram's date separator, run ONE tiny
-  // deterministic crop only for the date. This keeps the common path fast.
   if(!detectedDate) detectedDate=await detectTelegramDateFast(imageFile);
   const year=new Date().getFullYear();
   if(detectedDate){
    const mm=String(monthNum(detectedDate.month)).padStart(2,'0'),dd=String(detectedDate.day).padStart(2,'0');
    $('date').value=`${year}-${mm}-${dd}`;
   }
-  if(extracted.time && extracted.time!=='00:00')$('entryTime').value=extracted.time;
+  if(extracted.time)$('entryTime').value=extracted.time;
   if(extracted.symbol)$('symbol').value=extracted.symbol.toUpperCase();
   if(extracted.position)$('position').value=/short/i.test(extracted.position)?'Short':'Long';
   if(extracted.lev)$('lev').value=extracted.lev;
@@ -299,62 +300,35 @@ async function runOCR(){
   else $('ocrStatus').innerHTML='<span class="ok">✓ อ่านสำเร็จ: '+$('date').value+' '+$('entryTime').value+' | '+$('symbol').value+' | '+$('position').value+' | '+$('lev').value+'x | Entry '+$('entry').value+'</span>';
  }catch(e){console.error(e);$('ocrStatus').innerHTML='<span class="error">OCR error: '+(e?.message||e)+'</span>'}
 }
-
 function renderMeta(){
  $('rDate').textContent=$('date').value||'-';$('rTime').textContent=$('entryTime').value||'-';
  $('rSymbol').textContent=$('symbol').value||'-';$('rPos').textContent=$('position').value||'-';
  $('rLev').textContent=($('lev').value||'-')+'x';$('rEntry').textContent=$('entry').value||'-';
 }
 ['date','entryTime','symbol','position','lev','entry'].forEach(id=>$(id).addEventListener('input',renderMeta));
+const savedProxy=localStorage.getItem('bingx_proxy_url')||''; if($('proxyUrl')){$('proxyUrl').value=savedProxy;$('proxyUrl').addEventListener('change',()=>{const v=$('proxyUrl').value.trim();if(v)localStorage.setItem('bingx_proxy_url',v);else localStorage.removeItem('bingx_proxy_url');});}
 
 async function fetchKlines(symbol,startTime,endTime){
+  // GitHub Pages version: call BingX directly. Do NOT add custom headers,
+  // because X-SOURCE-KEY triggers a browser preflight and can cause CORS
+  // failure on iPhone Safari. The request remains a simple GET.
   const qs=`symbol=${encodeURIComponent(symbol)}&startTime=${startTime}&endTime=${endTime}&interval=1m&limit=1440&timestamp=${Date.now()}`;
-  try{
-    const r=await fetch(`/api/klines?${qs}`,{cache:'no-store'});
-    const j=await r.json();
-    if(r.ok&&j.ok&&Array.isArray(j.data)) return j;
-  }catch(e){}
   const bases=['https://open-api.bingx.com','https://open-api.bingx.pro'];
   let lastErr=null;
-
-  // GitHub Pages is static hosting, so /api/klines is unavailable and
-  // iOS Safari may block direct BingX requests because of CORS.
-  // Try a CORS relay first, then direct BingX as a fallback.
   for(const base of bases){
     const url=`${base}/openApi/swap/v3/quote/klines?${qs}`;
-    const attempts=[
-      {url:`https://r.jina.ai/${url}`, opts:{method:'GET',cache:'no-store',headers:{'Accept':'application/json'}}},
-      {url:`https://everyorigin.jwvbremen.nl/get?url=${encodeURIComponent(url)}`, opts:{method:'GET',cache:'no-store'}},
-      {url:`https://api.cors.syrins.tech/?url=${encodeURIComponent(url)}`, opts:{method:'GET',cache:'no-store'}},
-      {url:`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`, opts:{method:'GET',cache:'no-store'}},
-      {url:`https://api.cors.lol/?url=${encodeURIComponent(url)}`, opts:{method:'GET',cache:'no-store'}},
-      {url:`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, opts:{method:'GET',cache:'no-store'}},
-      {url, opts:{method:'GET',mode:'cors',cache:'no-store',headers:{'X-SOURCE-KEY':'BX-AI-SKILL'}}},
-      {url, opts:{method:'GET',mode:'cors',cache:'no-store'}}
-    ];
-    for(const a of attempts){
-      try{
-        const r=await fetch(a.url,a.opts);
-        if(!r.ok) throw new Error(`HTTP ${r.status}`);
-        const raw=await r.text();
-        let j=null;
-        try { j=JSON.parse(raw); } catch(e) {
-          const m=raw.match(/\{[\s\S]*\}/);
-          if(m) j=JSON.parse(m[0]);
-        }
-        if(!j) throw new Error('Proxy returned non-JSON data');
-        // Some relays wrap the upstream body in {contents: '...JSON...'}.
-        if(j.contents && typeof j.contents==='string'){ try { j=JSON.parse(j.contents); } catch(e){} }
-        if(Number(j.code)!==0) throw new Error(j.msg||`BingX code ${j.code}`);
-        const data=(j.data||[]).map(x=>Array.isArray(x)?({t:x[0],o:x[1],h:x[2],l:x[3],c:x[4]}):({t:x.time??x.openTime,o:x.open,h:x.high,l:x.low,c:x.close}));
-        if(data.length) return {ok:true,data};
-        throw new Error('BingX returned no kline data');
-      }catch(e){lastErr=e;}
-    }
+    try{
+      const r=await fetch(url,{method:'GET',mode:'cors',cache:'no-store'});
+      if(!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j=await r.json();
+      if(Number(j.code)!==0) throw new Error(j.msg||`BingX code ${j.code}`);
+      const data=(j.data||[]).map(x=>Array.isArray(x)?({t:x[0],o:x[1],h:x[2],l:x[3],c:x[4]}):({t:x.time??x.openTime,o:x.open,h:x.high,l:x.low,c:x.close}));
+      if(data.length) return {ok:true,data};
+      throw new Error('BingX returned no kline data');
+    }catch(e){lastErr=e;}
   }
-  throw new Error('BingX: เบราว์เซอร์บล็อกการเรียก API โดยตรง และ public CORS relays ที่ลองทั้งหมดไม่ตอบสนอง: '+(lastErr?.message||'network error'));
+  throw new Error('เชื่อมต่อ BingX จาก GitHub Pages ไม่สำเร็จ: '+(lastErr?.message||'Load failed'));
 }
-
 async function calculate(){
  const date=$('date').value,time=$('entryTime').value,symbol=$('symbol').value.trim().toUpperCase().replace(/[-_\\s]?USDT$/,'')+'-USDT';
  const pos=$('position').value, lev=Number($('lev').value), entryText=$('entry').value.trim(), lastText=$('last').value.trim();
