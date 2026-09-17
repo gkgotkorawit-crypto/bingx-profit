@@ -177,9 +177,10 @@ function parseOCR(t){
  let entry;
  const em=s.match(/Entry\s+Targets?[^\d]{0,120}(\d+\.\d{3,})/i); if(em)entry=em[1];
  let tm=s.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+ if(tm && Number(tm[1])===0 && Number(tm[2])===0) tm=null;
  if(!tm){
    const compact=s.match(/(?:^|[^0-9])(?:[0-9]\s*)?([01]\d|2[0-3])[:.]([0-5]\d)(?!\d)/);
-   if(compact) tm=[compact[0],compact[1],compact[2]];
+   if(compact) { const hh=Number(compact[1]), mm=Number(compact[2]); if(!(hh===0 && mm===0)) tm=[compact[0],compact[1],compact[2]]; }
  }
  const md=monthFromText(s);
  return {symbol,position,lev,entry,time:tm?tm[0]:null,month:md?md.month:null,day:md?md.day:null};
@@ -190,28 +191,48 @@ function monthNum(name){return new Date(Date.parse(name+' 1, 2000')).getMonth()+
 // corner of the actual Telegram message bubble.
 async function detectTelegramTime(imageFile){
  const bmp=await createImageBitmap(imageFile), W=bmp.width, H=bmp.height;
- const candidates=[[0.62,0.78,0.38,0.22],[0.50,0.82,0.50,0.18],[0.55,0.72,0.45,0.28],[0.40,0.80,0.60,0.20]];
+ // Telegram message timestamps are tiny, light-gray text at the lower-right of the message bubble.
+ // Scan a dense set of overlapping lower-right crops. Never accept 00:00 as a real timestamp.
+ const candidates=[];
+ for(const fx of [0.45,0.52,0.58,0.64]) for(const fy of [0.70,0.76,0.82]){
+   candidates.push([fx,fy,1-fx,1-fy]);
+ }
  const found=[];
  for(let i=0;i<candidates.length;i++){
-  const [fx,fy,fw,fh]=candidates[i]; const sx=Math.max(0,Math.floor(W*fx)), sy=Math.max(0,Math.floor(H*fy));
-  const sw=Math.max(20,Math.min(W-sx,Math.floor(W*fw))), sh=Math.max(20,Math.min(H-sy,Math.floor(H*fh)));
-  const base=document.createElement('canvas'); const scale=Math.min(6,Math.max(4,1000/sw));
-  base.width=Math.round(sw*scale); base.height=Math.round(sh*scale); base.getContext('2d').drawImage(bmp,sx,sy,sw,sh,0,0,base.width,base.height);
+  const [fx,fy,fw,fh]=candidates[i];
+  const sx=Math.max(0,Math.floor(W*fx)), sy=Math.max(0,Math.floor(H*fy));
+  const sw=Math.max(30,Math.min(W-sx,Math.floor(W*fw))), sh=Math.max(30,Math.min(H-sy,Math.floor(H*fh)));
+  const base=document.createElement('canvas');
+  const scale=Math.min(8,Math.max(5,1200/sw));
+  base.width=Math.round(sw*scale); base.height=Math.round(sh*scale);
+  base.getContext('2d').drawImage(bmp,sx,sy,sw,sh,0,0,base.width,base.height);
   const src=base.getContext('2d').getImageData(0,0,base.width,base.height);
-  for(let pass=0;pass<4;pass++){
-   const c=document.createElement('canvas'); c.width=base.width;c.height=base.height; const cx=c.getContext('2d');
-   const d=new Uint8ClampedArray(src.data);
-   for(let p=0;p<d.length;p+=4){ const v=.299*d[p]+.587*d[p+1]+.114*d[p+2]; const q=pass===0?v:(v>(pass===1?155:pass===2?175:195)?255:0); d[p]=d[p+1]=d[p+2]=q; }
+  for(let pass=0;pass<5;pass++){
+   const c=document.createElement('canvas'); c.width=base.width;c.height=base.height;
+   const cx=c.getContext('2d'); const d=new Uint8ClampedArray(src.data);
+   for(let p=0;p<d.length;p+=4){
+     const v=.299*d[p]+.587*d[p+1]+.114*d[p+2];
+     let q=v;
+     if(pass>0) q=v>(pass===1?135:pass===2?155:pass===3?175:195)?255:0;
+     d[p]=d[p+1]=d[p+2]=q;
+   }
    cx.putImageData(new ImageData(d,base.width,base.height),0,0);
-   for(const psm of ['7','6','11','13']){
-    try{ const r=await ocrCanvas(c,`ค้นหาเวลา ${i+1}`,{tessedit_pageseg_mode:psm,tessedit_char_whitelist:'0123456789:'});
+   for(const psm of ['6','7','11','13']){
+    try{
+     const r=await ocrCanvas(c,`เวลา ${i+1}`,{tessedit_pageseg_mode:psm,tessedit_char_whitelist:'0123456789:.'});
      const txt=(r.data.text||'').replace(/[OoQ]/g,'0').replace(/[IlL|]/g,'1').replace(/[Ss]/g,'5');
-     for(const m of txt.matchAll(/(?:^|[^0-9])([01]?\d|2[0-3])\s*[:.]\s*([0-5]\d)(?!\d)/g)) found.push(`${String(Number(m[1])).padStart(2,'0')}:${m[2]}`);
+     for(const m of txt.matchAll(/(?:^|[^0-9])([01]?\d|2[0-3])\s*[:.]\s*([0-5]\d)(?!\d)/g)){
+       const hh=Number(m[1]), mm=Number(m[2]);
+       if(hh===0 && mm===0) continue;
+       found.push(`${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`);
+     }
     }catch(e){}
    }
   }
  }
- if(!found.length)return null; const counts={}; found.forEach(x=>counts[x]=(counts[x]||0)+1); return Object.keys(counts).sort((a,b)=>counts[b]-counts[a])[0];
+ if(!found.length)return null;
+ const counts={}; found.forEach(x=>counts[x]=(counts[x]||0)+1);
+ return Object.keys(counts).sort((a,b)=>counts[b]-counts[a])[0] || null;
 }
 async function runOCR(){
  if(!imageFile){setStatus('กรุณาเลือกรูปก่อน','error');return}
@@ -251,11 +272,9 @@ async function runOCR(){
    extracted=parseOCR(ocrText);
    // V15: dedicated Telegram timestamp scan; never use the phone status-bar clock.
    const telegramTime=await detectTelegramTime(imageFile);
-   // Keep a valid OCR time if the dedicated crop accidentally sees a false 00:00.
-   // Telegram's actual timestamp is the small time at the lower-right of the message bubble.
-   if(telegramTime && telegramTime !== '00:00') extracted.time=telegramTime;
-   // If the dedicated detector returns midnight, trust the main OCR result instead.
-   if((!extracted.time || extracted.time==='00:00') && telegramTime && telegramTime!=='00:00') extracted.time=telegramTime;
+   // V21: midnight is never a valid OCR fallback for this Telegram timestamp.
+   if(extracted.time==='00:00') extracted.time=null;
+   if(telegramTime) extracted.time=telegramTime;
    const detectedDate=monthFromText(dateOCR)||monthFromText(ocrText);
    const year=new Date().getFullYear();
    if(detectedDate){
@@ -303,6 +322,7 @@ async function fetchKlines(symbol,startTime,endTime){
   for(const base of bases){
     const url=`${base}/openApi/swap/v3/quote/klines?${qs}`;
     const attempts=[
+      {url:`https://r.jina.ai/${url}`, opts:{method:'GET',cache:'no-store',headers:{'Accept':'application/json'}}},
       {url:`https://everyorigin.jwvbremen.nl/get?url=${encodeURIComponent(url)}`, opts:{method:'GET',cache:'no-store'}},
       {url:`https://api.cors.syrins.tech/?url=${encodeURIComponent(url)}`, opts:{method:'GET',cache:'no-store'}},
       {url:`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`, opts:{method:'GET',cache:'no-store'}},
@@ -315,7 +335,15 @@ async function fetchKlines(symbol,startTime,endTime){
       try{
         const r=await fetch(a.url,a.opts);
         if(!r.ok) throw new Error(`HTTP ${r.status}`);
-        const j=await r.json();
+        const raw=await r.text();
+        let j=null;
+        try { j=JSON.parse(raw); } catch(e) {
+          const m=raw.match(/\{[\s\S]*\}/);
+          if(m) j=JSON.parse(m[0]);
+        }
+        if(!j) throw new Error('Proxy returned non-JSON data');
+        // Some relays wrap the upstream body in {contents: '...JSON...'}.
+        if(j.contents && typeof j.contents==='string'){ try { j=JSON.parse(j.contents); } catch(e){} }
         if(Number(j.code)!==0) throw new Error(j.msg||`BingX code ${j.code}`);
         const data=(j.data||[]).map(x=>Array.isArray(x)?({t:x[0],o:x[1],h:x[2],l:x[3],c:x[4]}):({t:x.time??x.openTime,o:x.open,h:x.high,l:x.low,c:x.close}));
         if(data.length) return {ok:true,data};
