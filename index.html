@@ -182,55 +182,33 @@ function parseOCR(t){
 }
 function monthNum(name){return new Date(Date.parse(name+' 1, 2000')).getMonth()+1}
 
-// V15: dedicated Telegram message timestamp detector.
-// Reads the timestamp inside the Telegram message bubble, not the phone clock.
+// V17: Telegram timestamp detector — focus tightly on the lower-right
+// corner of the actual Telegram message bubble.
 async function detectTelegramTime(imageFile){
  const bmp=await createImageBitmap(imageFile), W=bmp.width, H=bmp.height;
- // Telegram message timestamps are normally in the lower-right corner of the message bubble.
- // Use overlapping lower-area scans so small/grey timestamps are not missed.
- const boxes=[
-   [.45,.72,.55,.28],[.30,.65,.70,.35],[.55,.78,.40,.20],
-   [.20,.55,.80,.45],[.00,.65,1.00,.35]
- ];
+ const candidates=[[0.62,0.78,0.38,0.22],[0.50,0.82,0.50,0.18],[0.55,0.72,0.45,0.28],[0.40,0.80,0.60,0.20]];
  const found=[];
- for(let i=0;i<boxes.length;i++){
-  const [fx,fy,fw,fh]=boxes[i], sx=Math.max(0,Math.floor(W*fx)), sy=Math.max(0,Math.floor(H*fy));
-  const sw=Math.min(W-sx,Math.floor(W*fw)), sh=Math.min(H-sy,Math.floor(H*fh));
-  if(sw<20||sh<20)continue;
-  const base=document.createElement('canvas'), scale=Math.min(4,Math.max(2,1200/sw));
-  base.width=Math.floor(sw*scale); base.height=Math.floor(sh*scale);
-  base.getContext('2d').drawImage(bmp,sx,sy,sw,sh,0,0,base.width,base.height);
-  const variants=[];
-  // Original grayscale + several thresholds. Telegram's grey timestamp is often faint.
-  const raw=base.getContext('2d').getImageData(0,0,base.width,base.height);
-  for(const threshold of [null,120,150,180,205]){
-    const c=document.createElement('canvas'); c.width=base.width;c.height=base.height;
-    const cx=c.getContext('2d'); cx.putImageData(new ImageData(new Uint8ClampedArray(raw.data),raw.width,raw.height),0,0);
-    const im=cx.getImageData(0,0,c.width,c.height), d=im.data;
-    for(let p=0;p<d.length;p+=4){
-      const v=.299*d[p]+.587*d[p+1]+.114*d[p+2];
-      const q=threshold===null ? v : (v>threshold?255:0);
-      d[p]=d[p+1]=d[p+2]=q;
-    }
-    cx.putImageData(im,0,0); variants.push(c);
-  }
-  for(const c of variants){
-   for(const psm of [10,11,12,6]){
-    try{
-      const r=await ocrCanvas(c,`เวลา Telegram ${i+1}`,{tessedit_pageseg_mode:String(psm),tessedit_char_whitelist:'0123456789:'});
-      const txt=(r.data.text||'').replace(/[Oo]/g,'0').replace(/[Il|]/g,'1');
-      for(const m of txt.matchAll(/([01]\d|2[0-3])\s*[:.]\s*([0-5]\d)/g))
-        found.push(`${m[1]}:${m[2]}`);
+ for(let i=0;i<candidates.length;i++){
+  const [fx,fy,fw,fh]=candidates[i]; const sx=Math.max(0,Math.floor(W*fx)), sy=Math.max(0,Math.floor(H*fy));
+  const sw=Math.max(20,Math.min(W-sx,Math.floor(W*fw))), sh=Math.max(20,Math.min(H-sy,Math.floor(H*fh)));
+  const base=document.createElement('canvas'); const scale=Math.min(6,Math.max(4,1000/sw));
+  base.width=Math.round(sw*scale); base.height=Math.round(sh*scale); base.getContext('2d').drawImage(bmp,sx,sy,sw,sh,0,0,base.width,base.height);
+  const src=base.getContext('2d').getImageData(0,0,base.width,base.height);
+  for(let pass=0;pass<4;pass++){
+   const c=document.createElement('canvas'); c.width=base.width;c.height=base.height; const cx=c.getContext('2d');
+   const d=new Uint8ClampedArray(src.data);
+   for(let p=0;p<d.length;p+=4){ const v=.299*d[p]+.587*d[p+1]+.114*d[p+2]; const q=pass===0?v:(v>(pass===1?155:pass===2?175:195)?255:0); d[p]=d[p+1]=d[p+2]=q; }
+   cx.putImageData(new ImageData(d,base.width,base.height),0,0);
+   for(const psm of ['7','6','11','13']){
+    try{ const r=await ocrCanvas(c,`ค้นหาเวลา ${i+1}`,{tessedit_pageseg_mode:psm,tessedit_char_whitelist:'0123456789:'});
+     const txt=(r.data.text||'').replace(/[OoQ]/g,'0').replace(/[IlL|]/g,'1').replace(/[Ss]/g,'5');
+     for(const m of txt.matchAll(/(?:^|[^0-9])([01]?\d|2[0-3])\s*[:.]\s*([0-5]\d)(?!\d)/g)) found.push(`${String(Number(m[1])).padStart(2,'0')}:${m[2]}`);
     }catch(e){}
    }
   }
  }
- if(!found.length)return null;
- const counts={}; for(const x of found)counts[x]=(counts[x]||0)+1;
- // Prefer the candidate with the strongest OCR consensus.
- return found.slice().sort((a,b)=>(counts[b]-counts[a]))[0];
+ if(!found.length)return null; const counts={}; found.forEach(x=>counts[x]=(counts[x]||0)+1); return Object.keys(counts).sort((a,b)=>counts[b]-counts[a])[0];
 }
-
 async function runOCR(){
  if(!imageFile){setStatus('กรุณาเลือกรูปก่อน','error');return}
  $('ocrStatus').textContent='กำลังเตรียมภาพสำหรับ OCR...';
