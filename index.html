@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BingX Profit Calculator V27 DATEFIX</title>
+<title>BingX Profit Calculator V28 DATEFIX</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0b1118">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -194,19 +194,41 @@ async function detectTelegramTime(imageFile){
 
 async function detectTelegramDateFast(imageFile){
  const bmp=await createImageBitmap(imageFile),W=bmp.width,H=bmp.height;
- // V27: Telegram's "September 16" separator is around the upper-middle
- // of the Signal image. Use one precise crop instead of scanning the whole image.
- // This covers the current XPL/ALLO layouts and keeps OCR very fast.
- const sx=Math.floor(W*0.30), sy=Math.floor(H*0.32), sw=Math.floor(W*0.48), sh=Math.floor(H*0.10);
+ // Telegram date separator is near the top of the message image (about 8–15% height).
+ // Use one tight crop, then one high-contrast OCR pass.
+ const sx=Math.floor(W*0.28), sy=Math.floor(H*0.07), sw=Math.floor(W*0.48), sh=Math.floor(H*0.11);
  const c=document.createElement('canvas');
- const scale=Math.min(5.0,Math.max(3.0,1000/Math.max(1,sw)));
+ const scale=Math.min(5.5,Math.max(4.0,1200/Math.max(1,sw)));
  c.width=Math.round(sw*scale); c.height=Math.round(sh*scale);
  const ctx=c.getContext('2d');ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
  ctx.drawImage(bmp,sx,sy,sw,sh,0,0,c.width,c.height);
+
+ // The Telegram separator uses light text on a grey badge.
+ // Make the text bright and the background dark for reliable English month OCR.
+ const im=ctx.getImageData(0,0,c.width,c.height),d=im.data;
+ for(let i=0;i<d.length;i+=4){
+   const r=d[i],g=d[i+1],b=d[i+2];
+   const gray=0.299*r+0.587*g+0.114*b;
+   const mx=Math.max(r,g,b),mn=Math.min(r,g,b),sat=mx?((mx-mn)/mx):0;
+   // keep bright/low-saturation Telegram text and suppress green background
+   const keep=(gray>185 && sat<0.35) || gray>220;
+   const v=keep?255:0;
+   d[i]=d[i+1]=d[i+2]=v;
+ }
+ ctx.putImageData(im,0,0);
+
  try{
    const r=await ocrCanvas(c,'วันที่ Telegram',{tessedit_pageseg_mode:'7'});
-   return monthFromText(r.data.text||'');
- }catch(e){ return null; }
+   const raw=r.data.text||'';
+   const d1=monthFromText(raw);
+   if(d1) return d1;
+
+   // Tolerate common OCR damage to "September" while preserving the day.
+   const s=raw.replace(/\r/g,' ').replace(/\s+/g,' ');
+   const m=s.match(/(?:Sep(?:t(?:e|c|a)?m(?:b|e|r)*)?|S[e3]p[t7]?[a-z]*)\D{0,6}([0-9]{1,2})/i);
+   if(m) return {month:'September',day:Number(m[1])};
+ }catch(e){}
+ return null;
 }
 
 async function runOCR(){
