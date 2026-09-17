@@ -131,15 +131,42 @@ async function ocrCanvas(canvas,label,extraConfig={}){
  const worker=await getOCRWorker();
  return await worker.recognize(canvas,extraConfig,{text:true});
 }
-function monthFromText(t){
- const s=(t||'').replace(/[|]/g,'I').replace(/\u00a0/g,' ');
- const monthNames='January|February|March|April|May|June|July|August|September|October|November|December';
- let m=s.match(new RegExp('\\b('+monthNames+')\\s+([0-9]{1,2})\\b','i'));
- if(m)return {month:m[1],day:Number(m[2])};
- m=s.match(/\b(Sept(?:ember)?|Sep)\s*([0-9]{1,2})\b/i);
- if(m)return {month:'September',day:Number(m[2])};
+function levenshtein(a,b){
+ const m=a.length,n=b.length; if(!m)return n;if(!n)return m;
+ let prev=Array(n+1);for(let j=0;j<=n;j++)prev[j]=j;
+ for(let i=1;i<=m;i++){let cur=[i];for(let j=1;j<=n;j++)cur[j]=Math.min(cur[j-1]+1,prev[j]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));prev=cur;}return prev[n];
+}
+function fuzzyMonthFromText(t){
+ const raw=(t||'').replace(/\u00a0/g,' ').replace(/[|]/g,'I');
+ const months=['January','February','March','April','May','June','July','August','September','October','November','December'];
+ // First use the exact form.
+ for(const name of months){
+   const re=new RegExp('\\b'+name+'\\s*([0-9]{1,2})\\b','i');
+   const m=raw.match(re); if(m)return {month:name,day:Number(m[1])};
+ }
+ // OCR may split a month (e.g. "Septem ber") or alter 1–3 characters.
+ const tokens=[...raw.matchAll(/[A-Za-z]{1,20}|[0-9]{1,2}/g)].map(x=>({v:x[0],i:x.index}));
+ for(let i=0;i<tokens.length;i++){
+   if(!/^[A-Za-z]/.test(tokens[i].v))continue;
+   for(let span=1;span<=3 && i+span-1<tokens.length;span++){
+     const joined=tokens.slice(i,i+span).filter(x=>/^[A-Za-z]/.test(x.v)).map(x=>x.v).join('').toLowerCase();
+     if(!joined)continue;
+     for(const name of months){
+       const target=name.toLowerCase(), maxErr=target.length>=8?3:2;
+       if(Math.abs(joined.length-target.length)>3)continue;
+       if(levenshtein(joined,target)<=maxErr){
+         const after=tokens.slice(i+span,i+span+4).find(x=>/^[0-9]{1,2}$/.test(x.v) && x.i-tokens[i+span-1].i<16);
+         if(after){const day=Number(after.v);if(day>=1&&day<=31)return {month:name,day};}
+       }
+     }
+   }
+ }
+ // Specific tolerant handling for the common Telegram "September" OCR family.
+ const m=raw.match(/(?:S[e3][pP][t7]?(?:e|c|a)?m(?:b|e|r)?|Sept(?:ember)?|Sep)[^0-9]{0,12}([0-9]{1,2})/i);
+ if(m){const day=Number(m[1]);if(day>=1&&day<=31)return {month:'September',day};}
  return null;
 }
+function monthFromText(t){ return fuzzyMonthFromText(t); }
 function parseOCR(t){
  const s=t.replace(/\r/g,'\n');
  const symbol=(s.match(/#?\s*([A-Z]{2,12})\s*[/\\|JIl1]\s*(?:USDT|USD)/i)||[])[1];
@@ -158,6 +185,7 @@ function parseOCR(t){
  const md=monthFromText(s);
  return {symbol,position,lev,entry,time:tm?tm[0]:null,month:md?md.month:null,day:md?md.day:null};
 }
+
 function monthNum(name){return new Date(Date.parse(name+' 1, 2000')).getMonth()+1}
 
 // V24: one small, deterministic timestamp crop. No multi-threshold scanning.
@@ -194,39 +222,35 @@ async function detectTelegramTime(imageFile){
 
 async function detectTelegramDateFast(imageFile){
  const bmp=await createImageBitmap(imageFile),W=bmp.width,H=bmp.height;
- // Telegram date separator is near the top of the message image (about 8–15% height).
- // Use one tight crop, then one high-contrast OCR pass.
- const sx=Math.floor(W*0.28), sy=Math.floor(H*0.07), sw=Math.floor(W*0.48), sh=Math.floor(H*0.11);
+ // Telegram's date separator is normally in the upper 5–22% of the Signal image.
+ // Use one broad crop so small layout differences do not break detection.
+ const sx=Math.floor(W*0.18), sy=Math.floor(H*0.045), sw=Math.floor(W*0.68), sh=Math.floor(H*0.20);
  const c=document.createElement('canvas');
- const scale=Math.min(5.5,Math.max(4.0,1200/Math.max(1,sw)));
+ const scale=Math.min(4.8,Math.max(3.0,1100/Math.max(1,sw)));
  c.width=Math.round(sw*scale); c.height=Math.round(sh*scale);
  const ctx=c.getContext('2d');ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
  ctx.drawImage(bmp,sx,sy,sw,sh,0,0,c.width,c.height);
-
- // The Telegram separator uses light text on a grey badge.
- // Make the text bright and the background dark for reliable English month OCR.
- const im=ctx.getImageData(0,0,c.width,c.height),d=im.data;
- for(let i=0;i<d.length;i+=4){
-   const r=d[i],g=d[i+1],b=d[i+2];
-   const gray=0.299*r+0.587*g+0.114*b;
-   const mx=Math.max(r,g,b),mn=Math.min(r,g,b),sat=mx?((mx-mn)/mx):0;
-   // keep bright/low-saturation Telegram text and suppress green background
-   const keep=(gray>185 && sat<0.35) || gray>220;
-   const v=keep?255:0;
-   d[i]=d[i+1]=d[i+2]=v;
- }
- ctx.putImageData(im,0,0);
-
  try{
-   const r=await ocrCanvas(c,'วันที่ Telegram',{tessedit_pageseg_mode:'7'});
-   const raw=r.data.text||'';
-   const d1=monthFromText(raw);
-   if(d1) return d1;
+   // Pass 1: preserve the original pixels. This is often enough and avoids
+   // destroying the anti-aliased white date text.
+   let r=await ocrCanvas(c,'วันที่ Telegram',{tessedit_pageseg_mode:'11'});
+   let d1=fuzzyMonthFromText(r.data.text||'');
+   if(d1)return d1;
 
-   // Tolerate common OCR damage to "September" while preserving the day.
-   const s=raw.replace(/\r/g,' ').replace(/\s+/g,' ');
-   const m=s.match(/(?:Sep(?:t(?:e|c|a)?m(?:b|e|r)*)?|S[e3]p[t7]?[a-z]*)\D{0,6}([0-9]{1,2})/i);
-   if(m) return {month:'September',day:Number(m[1])};
+   // Pass 2 only when necessary: high-contrast image, optimized for the pale
+   // Telegram date badge. Tesseract supports recognizing a specific region and
+   // upscaling improves recognition on small text. See Tesseract.js docs.
+   const im=ctx.getImageData(0,0,c.width,c.height),d=im.data;
+   for(let i=0;i<d.length;i+=4){
+     const r=d[i],g=d[i+1],b=d[i+2],gray=0.299*r+0.587*g+0.114*b;
+     const mx=Math.max(r,g,b),mn=Math.min(r,g,b),sat=mx?((mx-mn)/mx):0;
+     const keep=(gray>=220)||(gray>=185&&sat<0.28);
+     const v=keep?255:0; d[i]=d[i+1]=d[i+2]=v;
+   }
+   ctx.putImageData(im,0,0);
+   r=await ocrCanvas(c,'วันที่ Telegram contrast',{tessedit_pageseg_mode:'7'});
+   d1=fuzzyMonthFromText(r.data.text||'');
+   if(d1)return d1;
  }catch(e){}
  return null;
 }
