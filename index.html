@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BingX Profit Calculator V54.2 iOS FAST SMART SIGNAL OCR ENGINE</title>
+<title>BingX Profit Calculator V54.4 iOS ULTRA FAST COLON TIME OCR ENGINE</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0b1118">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -32,7 +32,7 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 <body>
 <div class="wrap">
 <div class="card">
-<h1>⚡ BingX Profit Calculator <span style="font-size:11px;color:#20d19b;border:1px solid #20d19b;border-radius:999px;padding:3px 7px;vertical-align:middle">V54.2 iOS FAST SMART SIGNAL OCR ENGINE</span></h1>
+<h1>⚡ BingX Profit Calculator <span style="font-size:11px;color:#20d19b;border:1px solid #20d19b;border-radius:999px;padding:3px 7px;vertical-align:middle">V54.4 iOS ULTRA FAST COLON TIME OCR ENGINE</span></h1>
 
 </div>
 
@@ -94,8 +94,8 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 
 <script>
 const $ = (id) => document.getElementById(id);
-// ================= V54.2 iOS FAST SMART SIGNAL OCR ENGINE =================
-const MAX_IMAGE_EDGE=2600;
+// ================= V54.4 iOS ULTRA FAST COLON TIME OCR ENGINE =================
+const MAX_IMAGE_EDGE=2200;
 let currentFile=null;
 let contractBasesCache=null;
 function setStatus(msg,type='status'){const el=$('status');if(!el)return;el.className='status '+(type==='error'?'error':type==='ok'?'ok':'');el.textContent=msg;}
@@ -118,9 +118,9 @@ async function ensureTesseract(){if(window.Tesseract)return window.Tesseract;if(
 async function getOCRWorker(){
  await ensureTesseract();
  if(!ocrWorker){
-   $('ocrStatus').textContent='⏳ กำลังเตรียม Local OCR ครั้งแรก...';
+   $('ocrStatus').textContent='⏳ กำลังเตรียม OCR ครั้งแรก...';
    ocrWorker=await Tesseract.createWorker('eng',1,{logger:m=>{
-     if(m&&typeof m.progress==='number') $('ocrStatus').textContent=`🔎 กำลังโหลด OCR ${(m.progress*100).toFixed(0)}%...`;
+     if(m&&typeof m.progress==='number') $('ocrStatus').textContent=`⏳ กำลังเตรียม OCR Engine ${(m.progress*100).toFixed(0)}%...`;
    }});
  }
  return ocrWorker;
@@ -249,59 +249,69 @@ function pickBestText(arr){return arr.filter(Boolean).sort((a,b)=>{
 })[0]||'';}
 async function signalOCR(file){
  const img=await loadImage(file),base=imageCanvas(img);
- $('ocrStatus').textContent='⚡ 1/4 เตรียมภาพและหากล่อง Signal...';
- const card=findLightCard(base);
- if(!card) throw new Error('หา Signal card ไม่พบ');
+ $('ocrStatus').textContent='⚡ เตรียมพื้นที่ Signal...';
+ const card=findLightCard(base); if(!card) throw new Error('หา Signal card ไม่พบ');
  const W=card.width,H=card.height;
- // FAST PATH: one OCR pass over the card. Do not run 3 full-image passes.
- $('ocrStatus').textContent='⚡ 2/4 อ่าน Signal รอบหลัก...';
+ $('ocrStatus').textContent='🔎 อ่านข้อมูลหลัก 1 รอบ...';
  let main='';
- try{const d=await ocrFast(card,6,'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:/#()xX×-');main=d.text||'';}catch(e){main='';}
- // Date: one focused crop at the Telegram header/date pill. Retry only if missing.
- $('ocrStatus').textContent='📅 3/4 อ่านวันที่แบบเจาะจง...';
- const dateRegions=[
-   cropCanvas(card,Math.floor(W*.28),0,Math.floor(W*.72),Math.max(1,Math.floor(H*.20))),
-   cropCanvas(card,Math.floor(W*.40),0,Math.floor(W*.60),Math.max(1,Math.floor(H*.18)))
- ];
- let dateTexts=[];
- for(let i=0;i<dateRegions.length;i++){
-   try{
-     const d=await tessField(upscaleCanvas(preprocessCanvas(dateRegions[i],0),2.2),'date');
-     dateTexts.push(d.text||'');
-     if(extractDateSmart(d.text||'')) break;
-   }catch(e){}
+ try{ const d=await ocrFast(card,6,'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:/#()xX×-'); main=d.text||''; }catch(e){main='';}
+ let date=extractDateSmart(main),dateTexts=[];
+ if(!date){
+   $('ocrStatus').textContent='📅 อ่านวันที่เฉพาะจุด...';
+   const dr=cropCanvas(card,Math.floor(W*.18),0,Math.floor(W*.82),Math.floor(H*.22));
+   try{const d=await tessField(upscaleCanvas(preprocessCanvas(dr,0),1.8),'date');dateTexts=[d.text||''];date=extractDateSmart(dateTexts[0]);}catch(e){}
  }
- let date='';
- for(const t of dateTexts){date=extractDateSmart(t);if(date)break;}
- if(!date)date=extractDateSmart(main);
- // Time: one focused crop around bottom-right Telegram timestamp. Retry only if missing.
- $('ocrStatus').textContent='🕐 4/4 อ่านเวลาแบบเจาะจง...';
- const timeRegions=[
-   cropCanvas(card,Math.floor(W*.60),Math.floor(H*.84),Math.floor(W*.40),Math.max(1,Math.floor(H*.16))),
-   cropCanvas(card,Math.floor(W*.45),Math.floor(H*.76),Math.floor(W*.55),Math.max(1,Math.floor(H*.24)))
- ];
- let timeTexts=[];
- let time='';
- for(let i=0;i<timeRegions.length;i++){
-   try{
-     const d=await tessField(upscaleCanvas(preprocessCanvas(timeRegions[i],0),3),'time');
-     const tx=d.text||'';timeTexts.push(tx);
-     const c=extractTimeCandidates(tx);if(c.length){time=c[0];break;}
-   }catch(e){}
+ $('ocrStatus').textContent='🕐 ค้นหาเครื่องหมาย : เพื่ออ่านเวลา...';
+ let time='',timeTexts=[];
+ const candidates=locateColonTimeCandidates(card);
+ for(let i=0;i<candidates.length&&!time;i++){
+   try{const focused=upscaleCanvas(preprocessTimestampSmart(candidates[i].canvas),5);const d=await tess(focused,7,'0123456789:');const tx=d.text||'';timeTexts.push(tx);const cs=extractTimeCandidatesStrict(tx);if(cs.length)time=cs[0];}catch(e){}
  }
- if(!time){const c=extractTimeCandidates(main);if(c.length)time=c[c.length-1];}
+ if(!time){const cs=extractTimeCandidatesStrict(main);if(cs.length)time=cs[cs.length-1];}
  const combined=[main,...dateTexts,...timeTexts].join('\n');
- $('ocrRaw').textContent='V54.2 FAST SMART SIGNAL OCR\n\nMAIN OCR:\n'+main+'\n\nDATE FOCUS:\n'+dateTexts.join(' | ')+'\n\nTIME FOCUS:\n'+timeTexts.join(' | ');
- const symbolCandidates=extractSymbolSmart(combined);
- let resolved=await resolveSymbol(symbolCandidates);
- if(!resolved.symbol&&symbolCandidates[0])resolved={symbol:symbolCandidates[0],verified:false,score:100,raw:symbolCandidates[0]};
- const position=extractPositionSmart(combined);
- const lev=extractLeverageSmart(combined);
- const entry=extractEntrySmart(combined);
+ $('ocrRaw').textContent='V54.4 ULTRA FAST COLON-FIRST SIGNAL OCR\n\nMAIN OCR:\n'+main+'\n\nDATE FOCUS:\n'+dateTexts.join(' | ')+'\n\nTIME FOCUS (COLON CANDIDATE):\n'+timeTexts.join(' | ')+'\n\nCOLON CANDIDATES: '+candidates.length;
+ const symbolCandidates=extractSymbolSmart(combined);let resolved=await resolveSymbol(symbolCandidates);if(!resolved.symbol&&symbolCandidates[0])resolved={symbol:symbolCandidates[0],verified:false,score:100,raw:symbolCandidates[0]};
+ const position=extractPositionSmart(combined),lev=extractLeverageSmart(combined),entry=extractEntrySmart(combined);
  return {date:normalizeDateAI(date),time:normalizeTimeAI(time),symbol:resolved.symbol,position,lev:normalizeLevAI(lev),entry:normalizeEntryAI(entry),verifiedSymbol:resolved.verified,symbolScore:resolved.score,rawSymbol:resolved.raw||symbolCandidates[0]||''};
 }
+
+function preprocessTimestampSmart(c){
+ const o=document.createElement('canvas');o.width=c.width;o.height=c.height;const ctx=o.getContext('2d',{willReadFrequently:true});ctx.drawImage(c,0,0);
+ const im=ctx.getImageData(0,0,o.width,o.height),d=im.data;for(let i=0;i<d.length;i+=4){const g=.299*d[i]+.587*d[i+1]+.114*d[i+2];const v=g<205?0:255;d[i]=d[i+1]=d[i+2]=v;}ctx.putImageData(im,0,0);return o;
+}
+
+function locateColonTimeCandidates(card){
+ const W=card.width,H=card.height,y0=Math.floor(H*.82),y1=Math.floor(H*.995),x0=Math.floor(W*.20),x1=Math.floor(W*.99);
+ const ctx=card.getContext('2d',{willReadFrequently:true}),ww=x1-x0,hh=y1-y0,im=ctx.getImageData(x0,y0,ww,hh),d=im.data;
+ const hits=[];
+ // Scan for pairs of dark pixels vertically aligned like the two dots of ':'.
+ for(let y=2;y<hh-3;y++) for(let x=2;x<ww-2;x++){
+   let i=(y*ww+x)*4,g=.299*d[i]+.587*d[i+1]+.114*d[i+2];
+   if(g>=195) continue;
+   for(let dy=5;dy<=18;dy++){
+     const yy=y+dy;if(yy>=hh-1)break;i=(yy*ww+x)*4;g=.299*d[i]+.587*d[i+1]+.114*d[i+2];
+     if(g<195){
+       const cx=x+x0,cy=Math.round((y+yy)/2)+y0;
+       if(cx>W*.35&&cy>H*.84){
+         const bx=Math.max(0,cx-Math.floor(W*.18)),by=Math.max(0,cy-Math.floor(H*.055));
+         const bw=Math.min(W-bx,Math.floor(W*.42)),bh=Math.min(H-by,Math.floor(H*.11));
+         hits.push({score:Math.abs(dy-10)+Math.abs(x-(x)),cx,cy,canvas:cropCanvas(card,bx,by,bw,bh)});break;
+       }
+     }
+   }
+ }
+ // Deterministic fallbacks cover the common Telegram timestamp positions.
+ hits.push({score:40,cx:W*.72,cy:H*.93,canvas:cropCanvas(card,Math.floor(W*.42),Math.floor(H*.87),Math.floor(W*.55),Math.floor(H*.12))});
+ hits.push({score:50,cx:W*.62,cy:H*.93,canvas:cropCanvas(card,Math.floor(W*.30),Math.floor(H*.87),Math.floor(W*.55),Math.floor(H*.12))});
+ hits.sort((a,b)=>a.score-b.score);const uniq=[];for(const h of hits){if(!uniq.some(u=>Math.abs(u.cx-h.cx)<12&&Math.abs(u.cy-h.cy)<12))uniq.push(h);if(uniq.length>=4)break;}return uniq;
+}
+
+function extractTimeCandidatesStrict(text){
+ const t=String(text||'').replace(/[OoQqDd]/g,'0').replace(/[Il|]/g,'1').replace(/[Ss]/g,'5').replace(/[^0-9:\s]/g,' ');
+ const out=[];for(const m of t.matchAll(/(?:^|\s)([01]?\d|2[0-3])\s*:\s*([0-5]\d)(?=\s|$)/g))out.push(`${String(+m[1]).padStart(2,'0')}:${m[2]}`);return [...new Set(out)];
+}
 function applyLocalResult(a){if(a.date)$('date').value=a.date;if(a.time)$('entryTime').value=a.time;if(a.symbol)$('symbol').value=a.symbol;if(a.position)$('position').value=a.position;if(a.lev)$('lev').value=a.lev;if(a.entry)$('entry').value=a.entry;renderMeta();return a}
-async function runOCR(){if(!currentFile){setStatus('กรุณาเลือกรูป Signal ก่อน','error');return}['date','entryTime','symbol','entry'].forEach(id=>$(id).value='');$('lev').value='50';$('position').value='Short';renderMeta();$('out').style.display='none';$('message').textContent='ยังไม่มีผลลัพธ์';try{const a=await signalOCR(currentFile);applyLocalResult(a);const missing=[];if(!a.date)missing.push('วันที่');if(!a.time)missing.push('เวลา');if(!a.symbol)missing.push('Symbol');if(!a.position)missing.push('Long/Short');if(!a.lev)missing.push('Leverage');if(!a.entry)missing.push('Entry Price');if(a.symbol&&!a.verifiedSymbol){}if(missing.length)$('ocrStatus').innerHTML=`<span class="warn">⚠ V54.2 อ่านได้บางส่วน — ยังขาด/ไม่ยืนยัน: ${missing.join(', ')}</span>`;else $('ocrStatus').innerHTML=`<span class="ok">✓ V54.2 Fast Smart Signal OCR: ${a.date} ${a.time} | ${a.symbol} ✓BingX | ${a.position} | ${a.lev}x | Entry ${a.entry}</span>`;}catch(e){console.error(e);$('ocrStatus').innerHTML=`<span class="error">Signal OCR error: ${e.message}</span>`;setStatus('Signal OCR error: '+e.message,'error')}}
+async function runOCR(){if(!currentFile){setStatus('กรุณาเลือกรูป Signal ก่อน','error');return}['date','entryTime','symbol','entry'].forEach(id=>$(id).value='');$('lev').value='50';$('position').value='Short';renderMeta();$('out').style.display='none';$('message').textContent='ยังไม่มีผลลัพธ์';try{const a=await signalOCR(currentFile);applyLocalResult(a);const missing=[];if(!a.date)missing.push('วันที่');if(!a.time)missing.push('เวลา');if(!a.symbol)missing.push('Symbol');if(!a.position)missing.push('Long/Short');if(!a.lev)missing.push('Leverage');if(!a.entry)missing.push('Entry Price');if(a.symbol&&!a.verifiedSymbol){}if(missing.length)$('ocrStatus').innerHTML=`<span class="warn">⚠ V54.3 อ่านได้บางส่วน — ยังขาด/ไม่ยืนยัน: ${missing.join(', ')}</span>`;else $('ocrStatus').innerHTML=`<span class="ok">✓ V54.4 Ultra Fast Signal OCR: ${a.date} ${a.time} | ${a.symbol} ✓BingX | ${a.position} | ${a.lev}x | Entry ${a.entry}</span>`;}catch(e){console.error(e);$('ocrStatus').innerHTML=`<span class="error">Signal OCR error: ${e.message}</span>`;setStatus('Signal OCR error: '+e.message,'error')}}
 $('file').onchange=async e=>{currentFile=e.target.files?.[0]||null;if(!currentFile)return;try{if(window.__previewURL)URL.revokeObjectURL(window.__previewURL);window.__previewURL=URL.createObjectURL(currentFile);$('preview').src=window.__previewURL;$('preview').style.display='block';$('ocrStatus').textContent='เลือกรูปแล้ว — เริ่มสแกนอัตโนมัติ...';setStatus('⏳ กำลังเริ่มสแกน Signal...');await runOCR();}catch(err){console.error(err);$('ocrStatus').innerHTML='<span class="error">Signal OCR error: '+(err?.message||err)+'</span>';setStatus('Signal OCR error: '+(err?.message||err),'error');}};
 $('ocrBtn').onclick=async()=>{const b=$('ocrBtn');if(b.dataset.busy==='1')return;b.dataset.busy='1';b.disabled=true;b.textContent='⏳ กำลังสแกน...';try{await runOCR()}finally{b.disabled=false;b.dataset.busy='0';b.textContent='🔎 สแกน Signal ใหม่'}};
 function renderMeta(){
@@ -420,7 +430,7 @@ $('copyBtn').onclick=async()=>{await navigator.clipboard.writeText($('message').
 if('serviceWorker' in navigator){
  window.addEventListener('load',async()=>{
   try{
-   const BUILD='v54.1';
+   const BUILD='v54.4';
    if(localStorage.getItem('bingx_build')!==BUILD){
     const regs=await navigator.serviceWorker.getRegistrations();
     await Promise.all(regs.map(r=>r.unregister()));
