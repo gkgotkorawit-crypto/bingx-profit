@@ -153,6 +153,18 @@ function fuzzyMonthFromText(t){
  if(m){const day=Number(m[1]);if(day>=1&&day<=31)return {month:'September',day}}
  return null;
 }
+function monthNum(name){
+  const months={january:1,february:2,march:3,april:4,may:5,june:6,july:7,august:8,september:9,october:10,november:11,december:12};
+  const key=String(name||'').trim().toLowerCase();
+  if(months[key]) return months[key];
+  // tolerate common OCR abbreviations / misspellings
+  const ab={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12};
+  if(ab[key]) return ab[key];
+  const names=Object.keys(months);
+  let best=null,bestD=99;
+  for(const n of names){const d=levenshtein(key,n);if(d<bestD){bestD=d;best=months[n]}}
+  return bestD<=3?best:null;
+}
 function monthFromText(t){return fuzzyMonthFromText(t)}
 function parseOCR(t){
  const s=(t||'').replace(/\r/g,'\n');
@@ -283,7 +295,7 @@ async function readSignalFields(signal){
 }
 async function runOCR(){
  if(!imageFile){setStatus('กรุณาเลือกรูปก่อน','error');return}
- $('ocrStatus').textContent='กำลังสแกน V40 — ล็อก Signal ก่อนอ่านข้อมูล...';['date','entryTime','symbol','entry'].forEach(id=>$(id).value='');
+ $('ocrStatus').textContent='กำลังสแกน V41 — Signal Lock OCR...';['date','entryTime','symbol','entry'].forEach(id=>$(id).value='');
  try{
   const bmp=await createImageBitmap(imageFile);const region=await detectSignalRegion(bmp);const signal=cropAbsolute(bmp,region,1);
   const f=await readSignalFields(signal);
@@ -292,7 +304,7 @@ async function runOCR(){
   const dbg=[`REGION ${region.x},${region.y},${region.w},${region.h} (${region.method})`,`SYMBOL ${JSON.stringify(f.debug.symbol)}`,`BODY ${JSON.stringify(f.debug.body)}`,`ENTRY ${JSON.stringify(f.debug.entry)}`,`DATE ${JSON.stringify(f.debug.date)}`,`TIME ${JSON.stringify(f.debug.time)}`,`TIME_VOTES ${JSON.stringify(f.debug.timeVotes)}`];
   $('ocrRaw').textContent=dbg.join('\n');renderMeta();
   const missing=[];if(!$('date').value)missing.push('วันที่');if(!$('entryTime').value)missing.push('เวลาเข้า');if(!$('symbol').value)missing.push('Symbol');if(!$('position').value)missing.push('Long/Short');if(!$('lev').value)missing.push('Leverage');if(!$('entry').value)missing.push('Entry Price');
-  if(missing.length)$('ocrStatus').innerHTML='<span class="warn">⚠ V40 อ่านได้บางส่วน — ยังขาด: '+missing.join(', ')+'</span>';else $('ocrStatus').innerHTML='<span class="ok">✓ V40 Signal Lock: '+$('date').value+' '+$('entryTime').value+' | '+$('symbol').value+' | '+$('position').value+' | '+$('lev').value+'x | Entry '+$('entry').value+'</span>';
+  if(missing.length)$('ocrStatus').innerHTML='<span class="warn">⚠ V41 อ่านได้บางส่วน — ยังขาด: '+missing.join(', ')+'</span>';else $('ocrStatus').innerHTML='<span class="ok">✓ V41 Signal Lock: '+$('date').value+' '+$('entryTime').value+' | '+$('symbol').value+' | '+$('position').value+' | '+$('lev').value+'x | Entry '+$('entry').value+'</span>';
  }catch(e){console.error(e);$('ocrStatus').innerHTML='<span class="error">OCR error: '+(e?.message||e)+'</span>'}
 }
 
