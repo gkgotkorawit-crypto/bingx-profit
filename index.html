@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BingX Profit Calculator V50.1 AI VISION ENGINE FIX</title>
+<title>BingX Profit Calculator V50.2 AI VISION ENGINE</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0b1118">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -32,18 +32,19 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 <body>
 <div class="wrap">
 <div class="card">
-<h1>⚡ BingX Profit Calculator <span style="font-size:11px;color:#20d19b;border:1px solid #20d19b;border-radius:999px;padding:3px 7px;vertical-align:middle">V50.1 AI VISION ENGINE FIX</span></h1>
+<h1>⚡ BingX Profit Calculator <span style="font-size:11px;color:#20d19b;border:1px solid #20d19b;border-radius:999px;padding:3px 7px;vertical-align:middle">V50.2 AI VISION ENGINE</span></h1>
 <div class="sub">📱 iPhone / iPad — เพิ่มลงหน้าจอหลักจาก Safari ได้<br>อัปโหลดภาพ Signal → ระบบ OCR ข้อมูลในภาพ → คุณกรอกเฉพาะ LAST PRICE → ระบบค้นหาเวลาแตะราคาแรกหลังเข้าออเดอร์ และคำนวณระยะเวลา</div>
 </div>
 
 <div class="card">
-<label>🔐 Gemini Vision</label>
-<div class="grid">
-<div><label>Gemini API Key</label><input id="geminiKey" type="password" placeholder="AIza..." autocomplete="off"></div>
-<div><label>Vision Model</label><select id="geminiModel"><option value="gemini-3.8-flash">Gemini 3.8 Flash</option><option value="gemini-3.7-flash">Gemini 3.7 Flash</option><option value="gemini-3.6-flash">Gemini 3.6 Flash</option><option value="gemini-2.5-flash" selected>Gemini 2.5 Flash</option></select></div>
-</div>
-<div class="row" style="margin-top:10px"><button id="saveGemini" class="secondary">💾 บันทึก Key ในเครื่อง</button><button id="clearGemini" class="danger">ลบ Key</button></div>
-<div class="small" style="margin-top:8px">Key เก็บไว้ใน browser เครื่องนี้และใช้เรียก Gemini โดยตรง</div>
+<label>🤖 Gemini Vision</label>
+<div><label>Vision Model</label><select id="geminiModel">
+<option value="gemini-3.8-flash">Gemini 3.8 Flash</option>
+<option value="gemini-3.7-flash">Gemini 3.7 Flash</option>
+<option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
+<option value="gemini-2.5-flash" selected>Gemini 2.5 Flash</option>
+</select></div>
+<div class="small" style="margin-top:8px">🔒 Gemini API Key ถูกกำหนดไว้ในไฟล์นี้ ไม่ต้องกรอกบนหน้าเว็บ</div>
 </div>
 
 <div class="card">
@@ -105,23 +106,15 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 const $=id=>document.getElementById(id);
 let imageFile=null, ocrText='', extracted={targets:[]};
 let ocrWorkerPromise=null;
-const GEMINI_KEY_STORAGE='bingx_gemini_key';
+// ================= GEMINI API KEY =================
+// ใส่ Gemini API Key ของคุณตรงนี้เพียงครั้งเดียว แล้ว deploy ไฟล์นี้
+// คำเตือน: GitHub Pages เป็น public client-side app ผู้ที่เข้าถึง source อาจเห็น key ได้
+const GEMINI_API_KEY = 'AQ.Ab8RN6IHUg9asc70UyYSAS1nPmzNefheI21kGnKl_lnGntUWKQ';
 const GEMINI_MODEL_STORAGE='bingx_gemini_model';
 const MAX_IMAGE_EDGE=1800;
 let currentFile=null;
-function loadGeminiSettings(){
- $('geminiKey').value=localStorage.getItem(GEMINI_KEY_STORAGE)||'';
- const m=localStorage.getItem(GEMINI_MODEL_STORAGE)||'gemini-2.5-flash';
- if([...$('geminiModel').options].some(o=>o.value===m)) $('geminiModel').value=m;
-}
-function saveGeminiSettings(){
- const k=$('geminiKey').value.trim(); if(k)localStorage.setItem(GEMINI_KEY_STORAGE,k);else localStorage.removeItem(GEMINI_KEY_STORAGE);
- localStorage.setItem(GEMINI_MODEL_STORAGE,$('geminiModel').value); setStatus('✓ บันทึก Gemini API Key ในเครื่องแล้ว','status');
-}
-$('saveGemini').onclick=saveGeminiSettings;
-$('clearGemini').onclick=()=>{localStorage.removeItem(GEMINI_KEY_STORAGE);$('geminiKey').value='';setStatus('ลบ Gemini API Key แล้ว','status');};
+$('geminiModel').value=localStorage.getItem(GEMINI_MODEL_STORAGE)||'gemini-2.5-flash';
 $('geminiModel').onchange=()=>localStorage.setItem(GEMINI_MODEL_STORAGE,$('geminiModel').value);
-loadGeminiSettings();
 function normalizeDateAI(v){const m=String(v||'').match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);if(!m)return '';const d=new Date(+m[1],+m[2]-1,+m[3]);return d.getFullYear()==+m[1]&&d.getMonth()==+m[2]-1&&d.getDate()==+m[3]?`${m[1]}-${String(+m[2]).padStart(2,'0')}-${String(+m[3]).padStart(2,'0')}`:''}
 function normalizeTimeAI(v){const m=String(v||'').match(/^(\d{1,2}):(\d{2})$/);if(!m)return '';const h=+m[1],mi=+m[2];return h<24&&mi<60?`${String(h).padStart(2,'0')}:${String(mi).padStart(2,'0')}`:''}
 function normalizeSymbolAI(v){let s=String(v||'').toUpperCase().trim().replace(/^#/,'').replace(/[^A-Z0-9]/g,'').replace(/USDT$/,'');return /^[A-Z0-9]{2,20}$/.test(s)?s:''}
@@ -148,7 +141,7 @@ Important visual rules: prioritize the actual #SYMBOL/USDT header; prioritize th
 Current local date: ${new Date().toISOString().slice(0,10)}.`;
 function schema(){return {type:'object',properties:{symbol:{type:'string'},date:{type:'string'},time:{type:'string'},position:{type:'string'},leverage:{type:'number'},entry_price:{type:'string'},confidence_symbol:{type:'number'},confidence_date:{type:'number'},confidence_time:{type:'number'},confidence_position:{type:'number'},confidence_leverage:{type:'number'},confidence_entry:{type:'number'},signal_found:{type:'boolean'},notes:{type:'string'}},required:['symbol','date','time','position','leverage','entry_price','confidence_symbol','confidence_date','confidence_time','confidence_position','confidence_leverage','confidence_entry','signal_found','notes']};}
 async function callGeminiVision(img){
- const key=$('geminiKey').value.trim()||localStorage.getItem(GEMINI_KEY_STORAGE)||''; if(!key)throw new Error('กรุณาใส่ Gemini API Key ก่อน');
+ const key=GEMINI_API_KEY.trim(); if(!key || key==='PASTE_YOUR_GEMINI_API_KEY_HERE')throw new Error('ยังไม่ได้ฝัง Gemini API Key ใน index.html');
  const model=$('geminiModel').value; const url=`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
  const body={contents:[{role:'user',parts:[{text:VISION_PROMPT},{inline_data:{mime_type:img.mime,data:img.data}}]}],generationConfig:{temperature:0,responseMimeType:'application/json',responseSchema:schema()}};
  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const text=await r.text();
@@ -168,7 +161,7 @@ async function runOCR(){
  $('ocrStatus').textContent='กำลังส่งภาพให้ Gemini Vision...';
  try{
   const img=await prepareGeminiImage(currentFile); const result=await callGeminiVision(img); const a=applyAIResult(result.data);
-  $('ocrRaw').textContent=`V50 AI VISION\nMODEL: ${$('geminiModel').value}\nRESULT:\n${JSON.stringify(result.data,null,2)}\n\nNORMALIZED:\n${JSON.stringify(a,null,2)}`;
+  $('ocrRaw').textContent=`V50.2 AI VISION\nMODEL: ${$('geminiModel').value}\nRESULT:\n${JSON.stringify(result.data,null,2)}\n\nNORMALIZED:\n${JSON.stringify(a,null,2)}`;
   const missing=[];if(!a.date)missing.push('วันที่');if(!a.time)missing.push('เวลาเข้า');if(!a.symbol)missing.push('Symbol');if(!a.position)missing.push('Long/Short');if(!a.lev)missing.push('Leverage');if(!a.entry)missing.push('Entry Price');
   if(missing.length)$('ocrStatus').innerHTML=`<span class="warn">⚠ V50 AI Vision อ่านได้บางส่วน — ยังขาด: ${missing.join(', ')}</span>`;
   else $('ocrStatus').innerHTML=`<span class="ok">✓ V50 AI Vision: ${a.date} ${a.time} | ${a.symbol} | ${a.position} | ${a.lev}x | Entry ${a.entry}</span>`;
@@ -304,6 +297,6 @@ if('serviceWorker' in navigator){
   }catch(e){}
  });
 }
-window.addEventListener('load',()=>{$('ocrStatus').textContent='V50 AI Vision พร้อมใช้งาน — ใส่ Gemini API Key แล้วเลือกรูป Signal';});
+window.addEventListener('load',()=>{$('ocrStatus').textContent='V50.2 AI Vision พร้อมใช้งาน — เลือกรูป Signal ได้เลย';});
 </script>
 </body></html>
