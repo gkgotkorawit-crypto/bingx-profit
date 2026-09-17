@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BingX Profit Calculator V50.3 AI VISION ENGINE</title>
+<title>BingX Profit Calculator V50.6 AI VISION ENGINE</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0b1118">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -32,7 +32,7 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 <body>
 <div class="wrap">
 <div class="card">
-<h1>⚡ BingX Profit Calculator <span style="font-size:11px;color:#20d19b;border:1px solid #20d19b;border-radius:999px;padding:3px 7px;vertical-align:middle">V50.3 AI VISION ENGINE</span></h1>
+<h1>⚡ BingX Profit Calculator <span style="font-size:11px;color:#20d19b;border:1px solid #20d19b;border-radius:999px;padding:3px 7px;vertical-align:middle">V50.6 AI VISION ENGINE</span></h1>
 <div class="sub">📱 iPhone / iPad — เพิ่มลงหน้าจอหลักจาก Safari ได้<br>อัปโหลดภาพ Signal → ระบบ OCR ข้อมูลในภาพ → คุณกรอกเฉพาะ LAST PRICE → ระบบค้นหาเวลาแตะราคาแรกหลังเข้าออเดอร์ และคำนวณระยะเวลา</div>
 </div>
 
@@ -119,6 +119,23 @@ $('geminiModel').onchange=()=>localStorage.setItem(GEMINI_MODEL_STORAGE,$('gemin
 $('geminiKey').value=localStorage.getItem(GEMINI_KEY_STORAGE)||'';
 $('saveKeyBtn').onclick=()=>{const k=$('geminiKey').value.trim();if(k){localStorage.setItem(GEMINI_KEY_STORAGE,k);$('ocrStatus').innerHTML='<span class="ok">✓ บันทึก Gemini API Key ในเครื่องแล้ว</span>';}else{localStorage.removeItem(GEMINI_KEY_STORAGE);$('ocrStatus').textContent='ล้าง Gemini API Key แล้ว';}};
 $('clearKeyBtn').onclick=()=>{$('geminiKey').value='';localStorage.removeItem(GEMINI_KEY_STORAGE);$('ocrStatus').textContent='ล้าง Gemini API Key แล้ว';};
+
+function setStatus(msg,type='status'){
+ const el=$('status');
+ if(!el)return;
+ el.className='status '+(type==='error'?'error':type==='ok'?'ok':'');
+ el.textContent=msg;
+} 
+function duration(ms){
+ if(!Number.isFinite(ms)||ms<0)return '-';
+ const total=Math.floor(ms/1000), days=Math.floor(total/86400), hours=Math.floor((total%86400)/3600), mins=Math.floor((total%3600)/60), secs=total%60;
+ const parts=[];
+ if(days)parts.push(days+'วัน');
+ if(hours||days)parts.push(hours+'ชม.');
+ if(mins||hours||days)parts.push(mins+'นาที');
+ parts.push(secs+'วินาที');
+ return parts.join(' ');
+}
 function normalizeDateAI(v){const m=String(v||'').match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);if(!m)return '';const d=new Date(+m[1],+m[2]-1,+m[3]);return d.getFullYear()==+m[1]&&d.getMonth()==+m[2]-1&&d.getDate()==+m[3]?`${m[1]}-${String(+m[2]).padStart(2,'0')}-${String(+m[3]).padStart(2,'0')}`:''}
 function normalizeTimeAI(v){const m=String(v||'').match(/^(\d{1,2}):(\d{2})$/);if(!m)return '';const h=+m[1],mi=+m[2];return h<24&&mi<60?`${String(h).padStart(2,'0')}:${String(mi).padStart(2,'0')}`:''}
 function normalizeSymbolAI(v){let s=String(v||'').toUpperCase().trim().replace(/^#/,'').replace(/[^A-Z0-9]/g,'').replace(/USDT$/,'');return /^[A-Z0-9]{2,20}$/.test(s)?s:''}
@@ -284,13 +301,13 @@ async function calculate(){
    $('message').textContent=msg; setStatus('✓ คำนวณเสร็จแล้ว — สร้างข้อความ Profit Card ตามรูปแบบที่กำหนดแล้ว','status');
  }catch(e){setStatus('BingX/API error: '+e.message,'error')}
 }
-$('calcBtn').addEventListener('click',(ev)=>{ev.preventDefault(); calculate().catch(e=>setStatus('เกิดข้อผิดพลาด: '+(e?.message||e),'error'));});
+$('calcBtn').addEventListener('click',async(ev)=>{ev.preventDefault();setStatus('⏳ เริ่มคำนวณ...');try{await calculate()}catch(e){console.error(e);setStatus('เกิดข้อผิดพลาด: '+(e?.message||e),'error')}});
 window.addEventListener('error',e=>setStatus('JavaScript error: '+(e.message||'ไม่ทราบสาเหตุ'),'error'));
 $('copyBtn').onclick=async()=>{await navigator.clipboard.writeText($('message').textContent);setStatus('คัดลอกข้อความแล้ว','status')};
 if('serviceWorker' in navigator){
  window.addEventListener('load',async()=>{
   try{
-   const BUILD='v50';
+   const BUILD='v50.6';
    if(localStorage.getItem('bingx_build')!==BUILD){
     const regs=await navigator.serviceWorker.getRegistrations();
     await Promise.all(regs.map(r=>r.unregister()));
@@ -302,6 +319,6 @@ if('serviceWorker' in navigator){
   }catch(e){}
  });
 }
-window.addEventListener('load',()=>{$('ocrStatus').textContent='V50.2 AI Vision พร้อมใช้งาน — เลือกรูป Signal ได้เลย';});
+window.addEventListener('load',()=>{$('ocrStatus').textContent='V50.6 AI Vision พร้อมใช้งาน — เลือกรูป Signal ได้เลย';});
 </script>
 </body></html>
