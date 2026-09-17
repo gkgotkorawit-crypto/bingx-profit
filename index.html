@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BingX Profit Calculator V50 AI VISION ENGINE</title>
+<title>BingX Profit Calculator V50.1 AI VISION ENGINE FIX</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0b1118">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -32,7 +32,7 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 <body>
 <div class="wrap">
 <div class="card">
-<h1>⚡ BingX Profit Calculator <span style="font-size:11px;color:#20d19b;border:1px solid #20d19b;border-radius:999px;padding:3px 7px;vertical-align:middle">V50 AI VISION ENGINE</span></h1>
+<h1>⚡ BingX Profit Calculator <span style="font-size:11px;color:#20d19b;border:1px solid #20d19b;border-radius:999px;padding:3px 7px;vertical-align:middle">V50.1 AI VISION ENGINE FIX</span></h1>
 <div class="sub">📱 iPhone / iPad — เพิ่มลงหน้าจอหลักจาก Safari ได้<br>อัปโหลดภาพ Signal → ระบบ OCR ข้อมูลในภาพ → คุณกรอกเฉพาะ LAST PRICE → ระบบค้นหาเวลาแตะราคาแรกหลังเข้าออเดอร์ และคำนวณระยะเวลา</div>
 </div>
 
@@ -146,7 +146,7 @@ Extract exactly these fields from the Signal:
 
 Important visual rules: prioritize the actual #SYMBOL/USDT header; prioritize the Telegram date pill/separator; prioritize the tiny footer timestamp near the eye/view count; do not substitute data from the surrounding webpage. If a field is not visually reliable, return an empty string and explain in notes. Do not guess.
 Current local date: ${new Date().toISOString().slice(0,10)}.`;
-function schema(){return {type:'object',properties:{symbol:{type:'string'},date:{type:'string'},time:{type:'string'},position:{type:'string',enum:['Long','Short','']},leverage:{type:'number'},entry_price:{type:'string'},confidence_symbol:{type:'number'},confidence_date:{type:'number'},confidence_time:{type:'number'},confidence_position:{type:'number'},confidence_leverage:{type:'number'},confidence_entry:{type:'number'},signal_found:{type:'boolean'},notes:{type:'string'}},required:['symbol','date','time','position','leverage','entry_price','confidence_symbol','confidence_date','confidence_time','confidence_position','confidence_leverage','confidence_entry','signal_found','notes']};}
+function schema(){return {type:'object',properties:{symbol:{type:'string'},date:{type:'string'},time:{type:'string'},position:{type:'string'},leverage:{type:'number'},entry_price:{type:'string'},confidence_symbol:{type:'number'},confidence_date:{type:'number'},confidence_time:{type:'number'},confidence_position:{type:'number'},confidence_leverage:{type:'number'},confidence_entry:{type:'number'},signal_found:{type:'boolean'},notes:{type:'string'}},required:['symbol','date','time','position','leverage','entry_price','confidence_symbol','confidence_date','confidence_time','confidence_position','confidence_leverage','confidence_entry','signal_found','notes']};}
 async function callGeminiVision(img){
  const key=$('geminiKey').value.trim()||localStorage.getItem(GEMINI_KEY_STORAGE)||''; if(!key)throw new Error('กรุณาใส่ Gemini API Key ก่อน');
  const model=$('geminiModel').value; const url=`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
