@@ -32,7 +32,7 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 <body>
 <div class="wrap">
 <div class="card">
-<h1>⚡ BingX Profit Calculator</h1><div class="version-badge">V59 BINGX ONLY — NO CLOUD / NO API KEY — iOS</div>
+<h1>⚡ BingX Profit Calculator</h1><div class="version-badge">V59.3 BINGX ONLY — FAST SYMBOL OCR — iOS</div>
 
 </div>
 
@@ -383,11 +383,12 @@ async function signalOCR(file){
  // the supplied examples. This avoids false Symbols from Entry/TP/date text.
  let symbolCandidates=[];
  try{
-   const sb1=await tess(upscaleCanvas(searchBar,3.2),7,'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/# ');
-   const sb2=await tess(upscaleCanvas(signalHeader,3.0),7,'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/# ');
+   // The search bar is the clearest and most stable Symbol source in the supplied
+   // Telegram template. Use ONE tiny OCR pass only; the header is already included
+   // in the main strip, so a second dedicated pass only adds latency on iPhone.
+   const sb1=await tess(upscaleCanvas(searchBar,2.6),7,'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/# ');
    symbolCandidates=[...new Set([
      ...collectSearchSymbolCandidates(sb1.text||''),
-     ...collectSearchSymbolCandidates(sb2.text||''),
      ...collectSearchSymbolCandidates(main)
    ])];
  }catch(e){}
@@ -397,14 +398,10 @@ async function signalOCR(file){
    const cs=extractSymbolSmart(main);
    symbol=cs[0]||'';
  }
- // BingX-only verification is used when the public contract list is reachable.
- // If it is temporarily unreachable, keep the high-confidence #TOKEN candidate
- // rather than replacing it with an unrelated OCR token.
+ // Do NOT block the user-facing scan on BingX contract-list verification.
+ // Verification can be slow because GitHub Pages may have to pass through
+ // multiple CORS fallbacks. The high-confidence #TOKEN is returned immediately.
  let symbolVerified=false, symbolScore=0;
- if(symbolCandidates.length){
-   const vr=await resolveSymbol(symbolCandidates);
-   if(vr.symbol){symbol=vr.symbol;symbolVerified=!!vr.verified;symbolScore=vr.score||0;}
- }
  let dateValue=normalizeOCRDateFromText(main);
  if(/\bToday\b/i.test(cleanOCRText(main))){
    $('ocrStatus').textContent='📅 TODAY → ใช้วันที่ปัจจุบันของเครื่อง';
@@ -436,7 +433,8 @@ async function signalOCR(file){
  const raw='V58.1 TEMPLATE OCR\n\n'+main;
  $('ocrRaw').textContent=raw;
  // Symbol from Telegram search bar is the strongest source in the supplied template.
- // Do not block the scan on BingX network verification.
+ // Return immediately; BingX verification is intentionally deferred so the scan
+ // does not sit at 100% while waiting on network requests.
  return {
    date:normalizeDateAI(dateValue),time:normalizeTimeAI(timeValue),symbol:normalizeSymbolAI(symbol),
    position,lev:normalizeLevAI(lev),entry:normalizeEntryAI(entry),
@@ -462,7 +460,7 @@ function preprocessTimestamp(c){
 }
 
 function applyLocalResult(a){if(a.date)$('date').value=a.date;if(a.time)$('entryTime').value=a.time;if(a.symbol)$('symbol').value=a.symbol;if(a.position)$('position').value=a.position;if(a.lev)$('lev').value=a.lev;if(a.entry)$('entry').value=a.entry;renderMeta();return a}
-async function runOCR(){if(!currentFile){setStatus('กรุณาเลือกรูป Signal ก่อน','error');return}['date','entryTime','symbol','entry'].forEach(id=>$(id).value='');$('lev').value='50';$('position').value='Short';renderMeta();$('out').style.display='none';$('message').textContent='ยังไม่มีผลลัพธ์';try{const a=await signalOCR(currentFile);applyLocalResult(a);const missing=[];if(!a.date)missing.push('วันที่');if(!a.time)missing.push('เวลา');if(!a.symbol)missing.push('Symbol');if(!a.position)missing.push('Long/Short');if(!a.lev)missing.push('Leverage');if(!a.entry)missing.push('Entry Price');if(a.symbol&&!a.verifiedSymbol){}if(missing.length)$('ocrStatus').innerHTML=`<span class="warn">⚠ V58.1 อ่านได้บางส่วน — ยังขาด/ไม่ยืนยัน: ${missing.join(', ')}</span>`;else $('ocrStatus').innerHTML=`<span class="ok">✓ V58.1 Template Signal OCR: ${a.date} ${a.time} | ${a.symbol} ✓BingX | ${a.position} | ${a.lev}x | Entry ${a.entry}</span>`;}catch(e){console.error(e);$('ocrStatus').innerHTML=`<span class="error">Signal OCR error: ${e.message}</span>`;setStatus('Signal OCR error: '+e.message,'error')}}
+async function runOCR(){if(!currentFile){setStatus('กรุณาเลือกรูป Signal ก่อน','error');return}['date','entryTime','symbol','entry'].forEach(id=>$(id).value='');$('lev').value='50';$('position').value='Short';renderMeta();$('out').style.display='none';$('message').textContent='ยังไม่มีผลลัพธ์';try{const a=await signalOCR(currentFile);applyLocalResult(a);const missing=[];if(!a.date)missing.push('วันที่');if(!a.time)missing.push('เวลา');if(!a.symbol)missing.push('Symbol');if(!a.position)missing.push('Long/Short');if(!a.lev)missing.push('Leverage');if(!a.entry)missing.push('Entry Price');if(a.symbol&&!a.verifiedSymbol){}if(missing.length)$('ocrStatus').innerHTML=`<span class="warn">⚠ V58.1 อ่านได้บางส่วน — ยังขาด/ไม่ยืนยัน: ${missing.join(', ')}</span>`;else $('ocrStatus').innerHTML=`<span class="ok">✓ สแกนเสร็จ: ${a.date} ${a.time} | ${a.symbol} | ${a.position} | ${a.lev}x | Entry ${a.entry}</span>`;}catch(e){console.error(e);$('ocrStatus').innerHTML=`<span class="error">Signal OCR error: ${e.message}</span>`;setStatus('Signal OCR error: '+e.message,'error')}}
 $('file').onchange=async e=>{currentFile=e.target.files?.[0]||null;if(!currentFile)return;try{if(window.__previewURL)URL.revokeObjectURL(window.__previewURL);window.__previewURL=URL.createObjectURL(currentFile);$('preview').src=window.__previewURL;$('preview').style.display='block';$('ocrStatus').textContent='เลือกรูปแล้ว — เริ่มสแกนอัตโนมัติ...';setStatus('⏳ กำลังเริ่มสแกน Signal...');await runOCR();}catch(err){console.error(err);$('ocrStatus').innerHTML='<span class="error">Signal OCR error: '+(err?.message||err)+'</span>';setStatus('Signal OCR error: '+(err?.message||err),'error');}};
 $('ocrBtn').onclick=async()=>{const b=$('ocrBtn');if(b.dataset.busy==='1')return;b.dataset.busy='1';b.disabled=true;b.textContent='⏳ กำลังสแกน...';try{await runOCR()}finally{b.disabled=false;b.dataset.busy='0';b.textContent='🔎 สแกน Signal ใหม่'}};
 function renderMeta(){
@@ -512,7 +510,7 @@ function normalizeKlineJSON(j){
  if(!arr.length && j.data && Array.isArray(j.data.data)) arr=j.data.data;
  return arr.map(x=>Array.isArray(x)?({t:Number(x[0]),o:Number(x[1]),h:Number(x[2]),l:Number(x[3]),c:Number(x[4])}):({t:Number(x.time??x.openTime),o:Number(x.open),h:Number(x.high),l:Number(x.low),c:Number(x.close)})).filter(x=>Number.isFinite(x.t)&&Number.isFinite(x.h)&&Number.isFinite(x.l));
 }
-// ================= V59 BINGX ONLY / NO CLOUD / NO API KEY =================
+// ================= V59.3 BINGX ONLY / NO CLOUD / NO API KEY =================
 // K-line source is BingX ONLY. No Binance, Bybit, Cloudflare Worker,
 // BingX API key, or BingX API secret is used by the calculator.
 // The browser first calls BingX directly. If GitHub Pages/browser CORS blocks
@@ -623,7 +621,8 @@ async function calculate(){
 
    // Fixed Profit Card editing prompt requested by the user. Only the values
    // inside the original parentheses are replaced; parentheses are removed.
-   const msg=`ช่วยฉันเปลี่ยนตัวเลขสีเขียวจาก 448.97% เป็น ${profit.toFixed(2)}% โดยใช้ฟอนต์เดิม ไม่ต้องสีเปลี่ยนขนาด  และเปลี่ยนตัวเลขสีขาว 0.14336 เป็น ${entryText}\nและเปลี่ยนตัวเลขเลขสีขาว 0.15751 เป็น ${lastText} โดยใช้ฟอนต์เดิม ไม่ต้องเปลี่ยนสีเปลี่ยนขนาด \nและแก้ไขเวลาเป็น ${touchText} โดยใช้ฟอนต์เดิม ไม่ต้องเปลี่ยนสีเปลี่ยนขนาด `;
+   const msg=`ช่วยฉันเปลี่ยนตัวเลขสีเขียวจาก 448.97% เป็น ${profit.toFixed(2)}% โดยใช้ฟอนต์เดิม ไม่ต้องสีเปลี่ยนขนาด  และเปลี่ยนตัวเลขสีขาว 0.14336 เป็น ${entryText}\nและเปลี่ยนตัวเลขเลขสีขาว 0.15751 เป็น ${lastText} โดยใช้ฟอนต์เดิม ไม่ต้องเปลี่ยนสีเปลี่ยนขนาด \nและแก้ไขเวลาเป็น ${touchText} โดยใช้ฟอนต์เดิม ไม่ต้องเปลี่ยนสีเปลี่ยนขนาด 
+อย่าแก้ไขโลโก้สีเหลือง`;
    $('message').textContent=msg; setStatus('✓ คำนวณเสร็จแล้ว — สร้างข้อความ Profit Card ตามรูปแบบที่กำหนดแล้ว','status');
  }catch(e){setStatus('K-line error: '+e.message,'error')}
 }
