@@ -462,41 +462,40 @@ function normalizeKlineJSON(j){
  if(!arr.length && j.data && Array.isArray(j.data.data)) arr=j.data.data;
  return arr.map(x=>Array.isArray(x)?({t:Number(x[0]),o:Number(x[1]),h:Number(x[2]),l:Number(x[3]),c:Number(x[4])}):({t:Number(x.time??x.openTime),o:Number(x.open),h:Number(x.high),l:Number(x.low),c:Number(x.close)})).filter(x=>Number.isFinite(x.t)&&Number.isFinite(x.h)&&Number.isFinite(x.l));
 }
+const BINGX_PROXY_URL = localStorage.getItem('bingx_proxy_url') || '';
 async function fetchKlines(symbol,startTime,endTime){
- // BingX documents /openApi/swap/v3/quote/klines for perpetual OHLCV.
- // Keep the request public and browser-safe: no API secret is embedded in this GitHub Pages app.
- // A no-timestamp variant is included because some BingX edge nodes reject an otherwise valid
- // public market-data request when the client clock/edge clock differs.
+ // GitHub Pages is static. Current BingX REST market-data requests require
+ // signed authentication, so the browser must not contain an API secret.
+ // A small serverless proxy (worker.js supplied with this build) signs the
+ // BingX request server-side. UI/OCR/input logic is intentionally untouched.
  const baseParams=`symbol=${encodeURIComponent(symbol)}&startTime=${startTime}&endTime=${endTime}&interval=1m&limit=1440`;
- const qs=baseParams+'&timestamp='+Date.now();
- const directNoTs=`https://open-api.bingx.com/openApi/swap/v3/quote/klines?${baseParams}`;
- const directTs=`https://open-api.bingx.com/openApi/swap/v3/quote/klines?${qs}`;
- const proNoTs=`https://open-api.bingx.pro/openApi/swap/v3/quote/klines?${baseParams}`;
- const proTs=`https://open-api.bingx.pro/openApi/swap/v3/quote/klines?${qs}`;
- const candidates=[
-   {name:'BingX',url:directNoTs,headers:{},timeout:7000},
-   {name:'BingX timestamp',url:directTs,headers:{},timeout:7000},
-   {name:'BingX PRO',url:proNoTs,headers:{},timeout:7000},
-   {name:'BingX PRO timestamp',url:proTs,headers:{},timeout:7000},
-   {name:'AllOrigins',url:'https://api.allorigins.win/raw?url='+encodeURIComponent(directNoTs),timeout:10000},
-   {name:'AllOrigins timestamp',url:'https://api.allorigins.win/raw?url='+encodeURIComponent(directTs),timeout:10000},
-   {name:'AllOrigins PRO',url:'https://api.allorigins.win/raw?url='+encodeURIComponent(proNoTs),timeout:10000},
-   {name:'CorsProxy',url:'https://corsproxy.io/?url='+encodeURIComponent(directNoTs),timeout:10000},
-   {name:'CorsProxy PRO',url:'https://corsproxy.io/?url='+encodeURIComponent(proNoTs),timeout:10000},
-   {name:'CodeTabs',url:'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(directNoTs),timeout:10000},
-   {name:'Jina HTTPS',url:'https://r.jina.ai/'+directNoTs,timeout:12000},
-   {name:'Jina HTTP',url:'https://r.jina.ai/http://open-api.bingx.com/openApi/swap/v3/quote/klines?'+baseParams,timeout:12000}
- ];
+ const urls=[];
+ if(BINGX_PROXY_URL){
+   urls.push({name:'BingX Secure Proxy',url:BINGX_PROXY_URL.replace(/\/$/,'')+'/klines?'+baseParams,timeout:15000});
+ }
+ // Keep legacy public/proxy fallbacks for compatibility with deployments that
+ // still have access to unsigned BingX market endpoints.
+ const direct=`https://open-api.bingx.com/openApi/swap/v3/quote/klines?${baseParams}&timestamp=${Date.now()}`;
+ urls.push(
+   {name:'BingX direct',url:direct,timeout:7000},
+   {name:'AllOrigins',url:'https://api.allorigins.win/raw?url='+encodeURIComponent(direct),timeout:12000},
+   {name:'AllOrigins GET',url:'https://api.allorigins.win/get?url='+encodeURIComponent(direct),timeout:12000},
+   {name:'CorsProxy',url:'https://corsproxy.io/?url='+encodeURIComponent(direct),timeout:12000},
+   {name:'CodeTabs',url:'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(direct),timeout:12000}
+ );
  let lastErr=null;
- for(const item of candidates){
+ for(const item of urls){
    try{
-     const j=await fetchJSON(item.url,item.timeout||9000,item.headers||{});
+     const j=await fetchJSON(item.url,item.timeout||10000,{});
      const data=normalizeKlineJSON(j);
      if(data.length)return {ok:true,data,source:item.name};
      lastErr=new Error('ไม่มี K-line จาก '+item.name);
    }catch(e){lastErr=e;}
  }
- throw new Error('เชื่อมต่อข้อมูล BingX ไม่สำเร็จจาก GitHub Pages: '+(lastErr?.message||'Load failed'));
+ if(BINGX_PROXY_URL){
+   throw new Error('เชื่อมต่อ BingX Secure Proxy ไม่สำเร็จ: '+(lastErr?.message||'Load failed'));
+ }
+ throw new Error('GitHub Pages ต้องใช้ BingX Secure Proxy เพื่อเรียก K-line แบบ signed — กรุณาตั้ง BINGX_PROXY_URL ตามไฟล์ README');
 }
 
 async function calculate(){
