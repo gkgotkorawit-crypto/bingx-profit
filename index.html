@@ -423,46 +423,73 @@ function renderMeta(){
 ['date','entryTime','symbol','position','lev','entry'].forEach(id=>$(id).addEventListener('input',renderMeta));
 const savedProxy=localStorage.getItem('bingx_proxy_url')||''; if($('proxyUrl')){$('proxyUrl').value=savedProxy;$('proxyUrl').addEventListener('change',()=>{const v=$('proxyUrl').value.trim();if(v)localStorage.setItem('bingx_proxy_url',v);else localStorage.removeItem('bingx_proxy_url');});}
 
-async function fetchJSON(url, timeoutMs=7000, headers={}){
+async function fetchJSON(url, timeoutMs=9000, headers={}){
  const ac=new AbortController(); const timer=setTimeout(()=>ac.abort(),timeoutMs);
  try{
    const r=await fetch(url,{method:'GET',mode:'cors',cache:'no-store',signal:ac.signal,headers});
    if(!r.ok)throw new Error('HTTP '+r.status);
    const text=await r.text();
-   let j; try{j=JSON.parse(text)}catch(e){
-     const a=text.indexOf('{'),b=text.lastIndexOf('}'); if(a>=0&&b>a)j=JSON.parse(text.slice(a,b+1)); else throw new Error('Invalid JSON');
+   let j;
+   try{j=JSON.parse(text)}
+   catch(e){
+     // Some public CORS readers wrap the upstream JSON in "contents".
+     try{
+       const outer=JSON.parse(text);
+       if(outer && typeof outer.contents==='string') j=JSON.parse(outer.contents);
+       else if(outer && outer.data) j=outer;
+       else throw e;
+     }catch(_){
+       const a=text.indexOf('{'),b=text.lastIndexOf('}');
+       if(a>=0&&b>a)j=JSON.parse(text.slice(a,b+1)); else throw new Error('Invalid JSON');
+     }
+   }
+   // Unwrap common proxy formats.
+   if(j && typeof j.contents==='string'){
+     try{j=JSON.parse(j.contents)}catch(_){}
    }
    return j;
  }finally{clearTimeout(timer)}
 }
 function normalizeKlineJSON(j){
- if(!j||Number(j.code)!==0) throw new Error(j?.msg||('BingX code '+(j?.code??'unknown')));
+ if(!j) throw new Error('ไม่มีข้อมูลจาก API');
+ // Accept normal BingX response and a few proxy-wrapped variants.
+ if(j.contents && typeof j.contents==='string'){
+   try{j=JSON.parse(j.contents)}catch(_){}
+ }
+ if(Array.isArray(j)) return j.map(x=>Array.isArray(x)?({t:Number(x[0]),o:Number(x[1]),h:Number(x[2]),l:Number(x[3]),c:Number(x[4])}):({t:Number(x.time??x.openTime),o:Number(x.open),h:Number(x.high),l:Number(x.low),c:Number(x.close)})).filter(x=>Number.isFinite(x.t));
+ if(Number(j.code)!==0) throw new Error(j?.msg||('BingX code '+(j?.code??'unknown')));
  const arr=Array.isArray(j.data)?j.data:[];
  return arr.map(x=>Array.isArray(x)?({t:Number(x[0]),o:Number(x[1]),h:Number(x[2]),l:Number(x[3]),c:Number(x[4])}):({t:Number(x.time??x.openTime),o:Number(x.open),h:Number(x.high),l:Number(x.low),c:Number(x.close)})).filter(x=>Number.isFinite(x.t));
 }
 async function fetchKlines(symbol,startTime,endTime){
  const qs=`symbol=${encodeURIComponent(symbol)}&startTime=${startTime}&endTime=${endTime}&interval=1m&limit=1440&timestamp=${Date.now()}`;
- const origin=`https://open-api.bingx.com/openApi/swap/v3/quote/klines?${qs}`;
- const origin2=`https://open-api.bingx.pro/openApi/swap/v3/quote/klines?${qs}`;
+ const origins=[
+   `https://open-api.bingx.com/openApi/swap/v3/quote/klines?${qs}`,
+   `https://open-api.bingx.pro/openApi/swap/v3/quote/klines?${qs}`
+ ];
  const candidates=[
-   {name:'BingX',url:origin,headers:{'X-SOURCE-KEY':'BX-AI-SKILL'},timeout:5000},
-   {name:'BingX PRO',url:origin2,headers:{'X-SOURCE-KEY':'BX-AI-SKILL'},timeout:5000},
-   {name:'AllOrigins',url:'https://api.allorigins.win/raw?url='+encodeURIComponent(origin),timeout:7000},
-   {name:'CorsProxy',url:'https://corsproxy.io/?url='+encodeURIComponent(origin),timeout:7000},
-   {name:'CodeTabs',url:'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(origin),timeout:7000},
-   {name:'Jina',url:'https://r.jina.ai/'+origin,timeout:7000}
+   {name:'BingX',url:origins[0],headers:{},timeout:6000},
+   {name:'BingX PRO',url:origins[1],headers:{},timeout:6000},
+   {name:'AllOrigins',url:'https://api.allorigins.win/raw?url='+encodeURIComponent(origins[0]),timeout:9000},
+   {name:'AllOrigins PRO',url:'https://api.allorigins.win/raw?url='+encodeURIComponent(origins[1]),timeout:9000},
+   {name:'CorsProxy',url:'https://corsproxy.io/?url='+encodeURIComponent(origins[0]),timeout:9000},
+   {name:'CorsProxy PRO',url:'https://corsproxy.io/?url='+encodeURIComponent(origins[1]),timeout:9000},
+   {name:'CodeTabs',url:'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(origins[0]),timeout:9000},
+   {name:'Jina HTTPS',url:'https://r.jina.ai/'+origins[0],timeout:10000},
+   {name:'Jina HTTP',url:'https://r.jina.ai/http://open-api.bingx.com/openApi/swap/v3/quote/klines?'+qs,timeout:10000}
  ];
  let lastErr=null;
  for(const item of candidates){
    try{
-     const j=await fetchJSON(item.url,item.timeout||7000,item.headers||{});
+     const j=await fetchJSON(item.url,item.timeout||9000,item.headers||{});
      const data=normalizeKlineJSON(j);
      if(data.length)return {ok:true,data,source:item.name};
-     throw new Error('ไม่มี K-line');
+     lastErr=new Error('ไม่มี K-line จาก '+item.name);
    }catch(e){lastErr=e;}
  }
  throw new Error('เชื่อมต่อข้อมูล BingX ไม่สำเร็จจาก GitHub Pages: '+(lastErr?.message||'Load failed'));
 }
+
 async function calculate(){
  setStatus('กำลังเริ่มคำนวณและค้นหา BingX...');
  const date=$('date').value,time=$('entryTime').value,symbol=$('symbol').value.trim().toUpperCase().replace(/[-_\\s]?USDT$/,'')+'-USDT';
@@ -531,7 +558,7 @@ $('copyBtn').onclick=async()=>{await navigator.clipboard.writeText($('message').
 if('serviceWorker' in navigator){
  window.addEventListener('load',async()=>{
   try{
-   const BUILD='v57.0';
+   const BUILD='v58.1-api-fix';
    if(localStorage.getItem('bingx_build')!==BUILD){
     const regs=await navigator.serviceWorker.getRegistrations();
     await Promise.all(regs.map(r=>r.unregister()));
