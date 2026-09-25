@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BingX Profit Calculator V58.1 iOS TEMPLATE SIGNAL OCR ENGINE</title>
+<title>BingX Profit Calculator V59 BingX Only iOS</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0b1118">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -32,7 +32,7 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 <body>
 <div class="wrap">
 <div class="card">
-<h1>⚡ BingX Profit Calculator</h1><div class="version-badge">V58.1 iOS TEMPLATE SIGNAL OCR ENGINE</div>
+<h1>⚡ BingX Profit Calculator</h1><div class="version-badge">V59 BINGX ONLY — NO CLOUD / NO API KEY — iOS</div>
 
 </div>
 
@@ -421,7 +421,7 @@ function renderMeta(){
  $('rLev').textContent=($('lev').value||'-')+'x';$('rEntry').textContent=$('entry').value||'-';
 }
 ['date','entryTime','symbol','position','lev','entry'].forEach(id=>$(id).addEventListener('input',renderMeta));
-const savedProxy=localStorage.getItem('bingx_proxy_url')||''; if($('proxyUrl')){$('proxyUrl').value=savedProxy;$('proxyUrl').addEventListener('change',()=>{const v=$('proxyUrl').value.trim();if(v)localStorage.setItem('bingx_proxy_url',v);else localStorage.removeItem('bingx_proxy_url');});}
+
 
 async function fetchJSON(url, timeoutMs=9000, headers={}){
  const ac=new AbortController(); const timer=setTimeout(()=>ac.abort(),timeoutMs);
@@ -462,44 +462,61 @@ function normalizeKlineJSON(j){
  if(!arr.length && j.data && Array.isArray(j.data.data)) arr=j.data.data;
  return arr.map(x=>Array.isArray(x)?({t:Number(x[0]),o:Number(x[1]),h:Number(x[2]),l:Number(x[3]),c:Number(x[4])}):({t:Number(x.time??x.openTime),o:Number(x.open),h:Number(x.high),l:Number(x.low),c:Number(x.close)})).filter(x=>Number.isFinite(x.t)&&Number.isFinite(x.h)&&Number.isFinite(x.l));
 }
-const BINGX_PROXY_URL = localStorage.getItem('bingx_proxy_url') || '';
+// ================= V59 BINGX ONLY / NO CLOUD / NO API KEY =================
+// K-line source is BingX ONLY. No Binance, Bybit, Cloudflare Worker,
+// BingX API key, or BingX API secret is used by the calculator.
+// The browser first calls BingX directly. If GitHub Pages/browser CORS blocks
+// the direct request, the fallback readers still fetch the SAME BingX URL;
+// they do not substitute another exchange's market data.
+function normalizeBingXKlines(j){
+  if(!j) throw new Error('ไม่มีข้อมูลจาก BingX');
+  if(j.contents && typeof j.contents==='string'){
+    try{j=JSON.parse(j.contents)}catch(_){}
+  }
+  if(typeof j==='string'){
+    try{j=JSON.parse(j)}catch(_){}
+  }
+  if(Number(j.code)!==0) throw new Error(j?.msg||('BingX code '+(j?.code??'unknown')));
+  let arr=Array.isArray(j.data)?j.data:[];
+  if(!arr.length && j.data && Array.isArray(j.data.data)) arr=j.data.data;
+  return arr.map(x=>Array.isArray(x)
+    ? {t:Number(x[0]),o:Number(x[1]),h:Number(x[2]),l:Number(x[3]),c:Number(x[4])}
+    : {t:Number(x.time??x.openTime),o:Number(x.open),h:Number(x.high),l:Number(x.low),c:Number(x.close)})
+    .filter(x=>Number.isFinite(x.t)&&Number.isFinite(x.h)&&Number.isFinite(x.l))
+    .sort((a,b)=>a.t-b.t);
+}
+async function fetchBingXKlineURL(url,timeout=15000){
+  return await fetchJSON(url,timeout,{});
+}
 async function fetchKlines(symbol,startTime,endTime){
- // GitHub Pages is static. Current BingX REST market-data requests require
- // signed authentication, so the browser must not contain an API secret.
- // A small serverless proxy (worker.js supplied with this build) signs the
- // BingX request server-side. UI/OCR/input logic is intentionally untouched.
- const baseParams=`symbol=${encodeURIComponent(symbol)}&startTime=${startTime}&endTime=${endTime}&interval=1m&limit=1440`;
- const urls=[];
- if(BINGX_PROXY_URL){
-   urls.push({name:'BingX Secure Proxy',url:BINGX_PROXY_URL.replace(/\/$/,'')+'/klines?'+baseParams,timeout:15000});
- }
- // Keep legacy public/proxy fallbacks for compatibility with deployments that
- // still have access to unsigned BingX market endpoints.
- const direct=`https://open-api.bingx.com/openApi/swap/v3/quote/klines?${baseParams}&timestamp=${Date.now()}`;
- urls.push(
-   {name:'BingX direct',url:direct,timeout:7000},
-   {name:'AllOrigins',url:'https://api.allorigins.win/raw?url='+encodeURIComponent(direct),timeout:12000},
-   {name:'AllOrigins GET',url:'https://api.allorigins.win/get?url='+encodeURIComponent(direct),timeout:12000},
-   {name:'CorsProxy',url:'https://corsproxy.io/?url='+encodeURIComponent(direct),timeout:12000},
-   {name:'CodeTabs',url:'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(direct),timeout:12000}
- );
- let lastErr=null;
- for(const item of urls){
-   try{
-     const j=await fetchJSON(item.url,item.timeout||10000,{});
-     const data=normalizeKlineJSON(j);
-     if(data.length)return {ok:true,data,source:item.name};
-     lastErr=new Error('ไม่มี K-line จาก '+item.name);
-   }catch(e){lastErr=e;}
- }
- if(BINGX_PROXY_URL){
-   throw new Error('เชื่อมต่อ BingX Secure Proxy ไม่สำเร็จ: '+(lastErr?.message||'Load failed'));
- }
- throw new Error('GitHub Pages ต้องใช้ BingX Secure Proxy เพื่อเรียก K-line แบบ signed — กรุณาตั้ง BINGX_PROXY_URL ตามไฟล์ README');
+  const clean=String(symbol||'').toUpperCase().replace(/-USDT$/,'');
+  const pair=clean+'-USDT';
+  const qs=`symbol=${encodeURIComponent(pair)}&interval=1m&startTime=${startTime}&endTime=${endTime}&limit=1440&timestamp=${Date.now()}`;
+  const origin=`https://open-api.bingx.com/openApi/swap/v3/quote/klines?${qs}`;
+  const pro=`https://open-api.bingx.pro/openApi/swap/v3/quote/klines?${qs}`;
+  // Every fallback below requests the exact same BingX endpoint/data.
+  const urls=[
+    {name:'BingX Direct',url:origin,timeout:15000},
+    {name:'BingX PRO Direct',url:pro,timeout:15000},
+    {name:'BingX via CORS Proxy',url:'https://corsproxy.io/?url='+encodeURIComponent(origin),timeout:20000},
+    {name:'BingX via AllOrigins',url:'https://api.allorigins.win/raw?url='+encodeURIComponent(origin),timeout:20000},
+    {name:'BingX via CodeTabs',url:'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(origin),timeout:20000},
+    {name:'BingX via Jina',url:'https://r.jina.ai/'+origin,timeout:20000}
+  ];
+  let lastErr=null;
+  for(const item of urls){
+    try{
+      const j=await fetchBingXKlineURL(item.url,item.timeout);
+      const data=normalizeBingXKlines(j);
+      if(data.length)return {ok:true,data,source:item.name};
+      lastErr=new Error('BingX ตอบกลับแต่ไม่มี K-line');
+    }catch(e){lastErr=e;}
+  }
+  throw new Error('ไม่สามารถดึง K-line จาก BingX ได้: '+(lastErr?.message||'Load failed'));
 }
 
 async function calculate(){
- setStatus('กำลังเริ่มคำนวณและค้นหา BingX...');
+ setStatus('กำลังเชื่อมต่อ BingX และค้นหา K-line...');
  const date=$('date').value,time=$('entryTime').value,symbol=$('symbol').value.trim().toUpperCase().replace(/[-_\\s]?USDT$/,'')+'-USDT';
  const pos=$('position').value, lev=Number($('lev').value), entryText=$('entry').value.trim(), lastText=$('last').value.trim();
  if(!date||!time||!symbol||!entryText||!lastText){setStatus('กรุณาตรวจสอบ Date / Entry Time / Symbol / Entry / Last Price','error');return}
@@ -551,14 +568,14 @@ async function calculate(){
    const touchText=lastHit?formatTouchDateTime(lastHit.t):'ไม่พบ First Touch';
    $('lastTouch').textContent=touchText;
    $('lastDur').textContent=lastHit?duration(lastHit.t-entryTs):'-';
-   $('dataInfo').textContent=`${candles.length} x 1m | ${sourceName||'BingX'}${lastHit?' — พบ First Touch':' — ไม่พบ First Touch ภายใน 7 วัน'}`;
+   $('dataInfo').textContent=`${candles.length} x 1m | ${sourceName||'Public Market Data'}${lastHit?' — พบ First Touch':' — ไม่พบ First Touch ภายใน 7 วัน'}`;
    $('out').style.display='block';
 
    // Fixed Profit Card editing prompt requested by the user. Only the values
    // inside the original parentheses are replaced; parentheses are removed.
    const msg=`ช่วยฉันเปลี่ยนตัวเลขสีเขียวจาก 448.97% เป็น ${profit.toFixed(2)}% โดยใช้ฟอนต์เดิม ไม่ต้องสีเปลี่ยนขนาด  และเปลี่ยนตัวเลขสีขาว 0.14336 เป็น ${entryText}\nและเปลี่ยนตัวเลขเลขสีขาว 0.15751 เป็น ${lastText} โดยใช้ฟอนต์เดิม ไม่ต้องเปลี่ยนสีเปลี่ยนขนาด \nและแก้ไขเวลาเป็น ${touchText} โดยใช้ฟอนต์เดิม ไม่ต้องเปลี่ยนสีเปลี่ยนขนาด `;
    $('message').textContent=msg; setStatus('✓ คำนวณเสร็จแล้ว — สร้างข้อความ Profit Card ตามรูปแบบที่กำหนดแล้ว','status');
- }catch(e){setStatus('BingX/API error: '+e.message,'error')}
+ }catch(e){setStatus('K-line error: '+e.message,'error')}
 }
 $('calcBtn').addEventListener('click',async(ev)=>{ev.preventDefault();setStatus('⏳ เริ่มคำนวณ...');try{await calculate()}catch(e){console.error(e);setStatus('เกิดข้อผิดพลาด: '+(e?.message||e),'error')}});
 window.addEventListener('error',e=>setStatus('JavaScript error: '+(e.message||'ไม่ทราบสาเหตุ'),'error'));
@@ -566,7 +583,7 @@ $('copyBtn').onclick=async()=>{await navigator.clipboard.writeText($('message').
 if('serviceWorker' in navigator){
  window.addEventListener('load',async()=>{
   try{
-   const BUILD='v58.1-api-fix2';
+   const BUILD='v59-bingx-only';
    if(localStorage.getItem('bingx_build')!==BUILD){
     const regs=await navigator.serviceWorker.getRegistrations();
     await Promise.all(regs.map(r=>r.unregister()));
