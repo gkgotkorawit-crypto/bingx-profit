@@ -295,8 +295,15 @@ function makeOCRStrip(parts){
  let y=0; for(const p of parts){out.getContext('2d').drawImage(p,0,y);y+=p.height+gap;}
  return out;
 }
+function currentLocalISODate(){
+ const d=new Date();
+ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
 function normalizeOCRDateFromText(text){
  const t=cleanOCRText(text).replace(/Septem\s*ber/ig,'September').replace(/Sep\s*t\s*ember/ig,'September');
+ // Telegram uses the badge "Today" for signals from the current local day.
+ // Treat it as the device's current local date instead of trying to OCR a numeric date.
+ if(/\bToday\b/i.test(t)) return currentLocalISODate();
  let m=t.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s*(\d{1,2})\b/i);
  if(m){const mo=monthNumber(m[1]),day=+m[2];if(mo&&day>=1&&day<=31)return `${inferYearForMonthDay(mo,day)}-${String(mo).padStart(2,'0')}-${String(day).padStart(2,'0')}`;}
  return '';
@@ -359,6 +366,9 @@ async function signalOCR(file){
    symbol=cs[0]||'';
  }
  let dateValue=normalizeOCRDateFromText(main);
+ if(/\bToday\b/i.test(cleanOCRText(main))){
+   $('ocrStatus').textContent='📅 TODAY → ใช้วันที่ปัจจุบันของเครื่อง';
+ }
  // TIME FIX: never take the first HH:MM from the combined OCR strip because
  // the iPhone status bar can appear there (e.g. 02:05). Prefer the dedicated
  // bottom-right Signal footer OCR region, then fall back to the LAST candidate.
