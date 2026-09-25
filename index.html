@@ -310,14 +310,27 @@ function normalizeOCRDateFromText(text){
 }
 function extractSearchSymbol(text){
  const t=String(text||'').toUpperCase();
- // Prefer the Telegram header/search pattern: #TOKEN/USDT. This avoids
- // accidentally taking a token from unrelated OCR text.
- const exact=[...t.matchAll(/#\s*([A-Z0-9]{2,15})\s*\/\s*USDT\b/g)]
+ // The Telegram search bar/header is the authoritative Symbol source in the
+ // supplied examples. Prefer the exact #TOKEN/USDT pattern, then #TOKEN.
+ const exact=[...t.matchAll(/#\s*([A-Z0-9]{2,20})\s*[\/\\]\s*USDT\b/g)]
    .map(m=>normalizeSymbolAI(m[1])).filter(s=>s&&s!=='USDT');
  if(exact.length) return exact[0];
- const ms=[...t.matchAll(/#\s*([A-Z0-9]{2,15})\b/g)]
+ const ms=[...t.matchAll(/#\s*([A-Z0-9]{2,20})\b/g)]
    .map(m=>normalizeSymbolAI(m[1])).filter(s=>s&&s!=='USDT');
  return ms[0]||'';
+}
+function collectSearchSymbolCandidates(text){
+ const t=String(text||'').toUpperCase();
+ const out=[];
+ for(const re of [
+   /#\s*([A-Z0-9]{2,20})\s*[\/\\]\s*USDT\b/g,
+   /#\s*([A-Z0-9]{2,20})\b/g
+ ]){
+   for(const m of t.matchAll(re)){
+     const v=normalizeSymbolAI(m[1]); if(v&&v!=='USDT') out.push(v);
+   }
+ }
+ return [...new Set(out)];
 }
 function extractTimeCandidatesStrict(text){
  const t=String(text||'')
@@ -335,6 +348,13 @@ async function signalOCR(file){
  // Template learned from the supplied examples:
  // search bar is outside the white card; date badge is just above/right of card;
  // timestamp is at the bottom-right inside the card.
+ // Dedicated Telegram search/header crops. The examples show the real Symbol
+ // twice: in the top search bar (#AAVE) and in the signal header (#AAVE/USDT).
+ // Reading these small areas separately is substantially safer than asking one
+ // OCR pass to decide among prices, dates, leverage and the Symbol.
+ const searchBar=cropCanvas(base,0,0,base.width,Math.max(1,Math.floor(base.height*.105)));
+ const signalHeader=cropCanvas(base,0,Math.floor(base.height*.085),
+   base.width,Math.max(1,Math.floor(base.height*.115)));
  const top=cropCanvas(base,0,0,base.width,Math.max(1,Math.floor(base.height*.22)));
  const body=cropNorm(base,rect,.02,.08,.98,.45);
  const date=cropCanvas(base,
@@ -359,11 +379,31 @@ async function signalOCR(file){
    main=d.text||'';
  }catch(e){throw new Error('Local OCR: '+(e?.message||e));}
 
- // Symbol: header/search area is the authoritative source in the supplied template.
+ // SYMBOL ENGINE: use two dedicated OCR passes for the exact regions shown in
+ // the supplied examples. This avoids false Symbols from Entry/TP/date text.
+ let symbolCandidates=[];
+ try{
+   const sb1=await tess(upscaleCanvas(searchBar,3.2),7,'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/# ');
+   const sb2=await tess(upscaleCanvas(signalHeader,3.0),7,'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/# ');
+   symbolCandidates=[...new Set([
+     ...collectSearchSymbolCandidates(sb1.text||''),
+     ...collectSearchSymbolCandidates(sb2.text||''),
+     ...collectSearchSymbolCandidates(main)
+   ])];
+ }catch(e){}
  let symbol=extractSearchSymbol(main);
+ if(symbolCandidates.length) symbol=symbolCandidates[0];
  if(!symbol){
    const cs=extractSymbolSmart(main);
    symbol=cs[0]||'';
+ }
+ // BingX-only verification is used when the public contract list is reachable.
+ // If it is temporarily unreachable, keep the high-confidence #TOKEN candidate
+ // rather than replacing it with an unrelated OCR token.
+ let symbolVerified=false, symbolScore=0;
+ if(symbolCandidates.length){
+   const vr=await resolveSymbol(symbolCandidates);
+   if(vr.symbol){symbol=vr.symbol;symbolVerified=!!vr.verified;symbolScore=vr.score||0;}
  }
  let dateValue=normalizeOCRDateFromText(main);
  if(/\bToday\b/i.test(cleanOCRText(main))){
@@ -400,7 +440,7 @@ async function signalOCR(file){
  return {
    date:normalizeDateAI(dateValue),time:normalizeTimeAI(timeValue),symbol:normalizeSymbolAI(symbol),
    position,lev:normalizeLevAI(lev),entry:normalizeEntryAI(entry),
-   verifiedSymbol:false,symbolScore:0,rawSymbol:symbol
+   verifiedSymbol:symbolVerified,symbolScore,rawSymbol:symbol
  };
 }
 function preprocessTimestamp(c){
