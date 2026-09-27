@@ -32,7 +32,7 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 <body>
 <div class="wrap">
 <div class="card">
-<h1>⚡ BingX Profit Calculator</h1><div class="version-badge">V59.4 BINGX ONLY — SYMBOL OCR FIX — iOS</div>
+<h1>⚡ BingX Profit Calculator</h1><div class="version-badge">V59.5 BINGX ONLY — SYMBOL OCR FIX — iOS</div>
 
 </div>
 
@@ -385,45 +385,67 @@ async function signalOCR(file){
    main=d.text||'';
  }catch(e){throw new Error('Local OCR: '+(e?.message||e));}
 
- // SYMBOL ENGINE: OCR only the two exact Symbol locations from the supplied
- // examples. Run them in parallel so this does not re-introduce the old 100% hang.
+ // SYMBOL ENGINE V59.5: derive Symbol crops from the detected Signal card.
+ // The previous V59.4 crops were anchored to the whole screenshot. That works
+ // only when the uploaded file is the raw Telegram image; it fails when the
+ // user uploads an iPhone screenshot of the Calculator itself because the
+ // Signal is lower in the screenshot. The detected `rect` is therefore the
+ // anchor for both Telegram Symbol locations.
  let symbolCandidates=[];
  try{
    const cleanSymbolCanvas=(src)=>{
      const c=preprocessCanvas(src,0);
      const ctx=c.getContext('2d',{willReadFrequently:true});
      const im=ctx.getImageData(0,0,c.width,c.height),d=im.data;
-     // Remove red annotation strokes/highlights without touching black/blue text.
+     // Remove red annotation strokes without touching black/blue Telegram text.
      for(let i=0;i<d.length;i+=4){
        const r=d[i],g=d[i+1],b=d[i+2];
        if(r>145 && r>g*1.28 && r>b*1.28){ d[i]=d[i+1]=d[i+2]=245; }
      }
      ctx.putImageData(im,0,0);
-     return upscaleCanvas(c,3.2);
+     return upscaleCanvas(c,3.6);
    };
-   const [sb1,hd1]=await Promise.all([
-     tess(cleanSymbolCanvas(searchBar),7,'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/#'),
-     tess(cleanSymbolCanvas(signalHeader),7,'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/#')
+   // Search bar: immediately above the white Signal card. Keep only the left
+   // portion where #SYMBOL appears; this avoids the search icon/close button.
+   const searchSymbol=cropCanvas(base,
+     rect.x,
+     Math.max(0,rect.y-rect.h*.125),
+     rect.w*.62,
+     rect.h*.105);
+   // Signal header: #SYMBOL/USDT is the first text line in the white card.
+   const headerSymbol=cropCanvas(base,
+     rect.x+rect.w*.10,
+     rect.y,
+     rect.w*.68,
+     rect.h*.095);
+   // Combine both tiny crops into ONE OCR job. Tesseract.js uses a shared worker;
+   // running two recognize() calls in Promise.all can overwrite its parameters.
+   const symStrip=makeOCRStrip([
+     cleanSymbolCanvas(searchSymbol),
+     cleanSymbolCanvas(headerSymbol)
    ]);
-   symbolCandidates=[...new Set([
-     ...collectSearchSymbolCandidates(sb1.text||''),
-     ...collectSearchSymbolCandidates(hd1.text||''),
-     ...collectSearchSymbolCandidates(main)
-   ])];
- }catch(e){}
+   const symOCR=await tess(symStrip,6,'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/#');
+   const symText=symOCR.text||'';
+   const dedicated=[];
+   // Strong patterns: Telegram search #TOKEN and signal #TOKEN/USDT.
+   dedicated.push(...collectSearchSymbolCandidates(symText));
+   // If punctuation is lost by OCR, accept a standalone short token from the
+   // dedicated Symbol strip; BingX verification below will reject unrelated text.
+   for(const m of symText.toUpperCase().matchAll(/(?:^|\s)#?([A-Z0-9]{2,15})(?=\s|$)/g)){
+     const v=normalizeSymbolAI(m[1]);
+     if(v&&v!=='USDT'&&v!=='USD'&&v!=='X') dedicated.push(v);
+   }
+   symbolCandidates=[...new Set(dedicated.concat(collectSearchSymbolCandidates(main)))];
+ }catch(e){ console.warn('Symbol OCR:',e); }
  let symbol=extractSearchSymbol(main);
  if(symbolCandidates.length) symbol=symbolCandidates[0];
  if(!symbol){
    const cs=extractSymbolSmart(main);
    symbol=cs[0]||'';
  }
- // Do NOT block the user-facing scan on BingX contract-list verification.
- // Verification can be slow because GitHub Pages may have to pass through
- // multiple CORS fallbacks. The high-confidence #TOKEN is returned immediately.
+ // BingX-only verification/correction. Keep the existing short timeout so the
+ // calculation flow is not changed or slowed by a long network wait.
  let symbolVerified=false, symbolScore=0;
- // Fast BingX-only symbol verification/correction. It is deliberately bounded
- // to ~1.5s and runs only after OCR; it can correct OCR confusions such as
- // ESU -> SUI without making the scan wait indefinitely.
  try{
    const bases=await Promise.race([
      getBingXContracts(),
@@ -435,7 +457,9 @@ async function signalOCR(file){
        const r=normalizeSymbolAI(raw); if(!r)continue;
        for(const b of bases){
          const dist=editDistance(r,b);
-         const maxD=r.length<=4?2:1;
+         // Short symbols need stronger evidence; exact and one-character
+         // matches are preferred over aggressive 2-edit substitutions.
+         const maxD=r.length<=3?1:(r.length<=4?2:1);
          if(dist>maxD)continue;
          const score=100-dist*18-Math.abs(r.length-b.length)*4;
          if(!best||score>best.score)best={symbol:b,score,raw:r};
