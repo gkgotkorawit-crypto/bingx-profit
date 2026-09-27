@@ -32,7 +32,7 @@ pre{white-space:pre-wrap;background:#0a1119;border:1px solid #233244;padding:14p
 <body>
 <div class="wrap">
 <div class="card">
-<h1>⚡ BingX Profit Calculator</h1><div class="version-badge">V59.3 BINGX ONLY — FAST SYMBOL OCR — iOS</div>
+<h1>⚡ BingX Profit Calculator</h1><div class="version-badge">V59.4 BINGX ONLY — SYMBOL OCR FIX — iOS</div>
 
 </div>
 
@@ -352,9 +352,15 @@ async function signalOCR(file){
  // twice: in the top search bar (#AAVE) and in the signal header (#AAVE/USDT).
  // Reading these small areas separately is substantially safer than asking one
  // OCR pass to decide among prices, dates, leverage and the Symbol.
- const searchBar=cropCanvas(base,0,0,base.width,Math.max(1,Math.floor(base.height*.105)));
- const signalHeader=cropCanvas(base,0,Math.floor(base.height*.085),
-   base.width,Math.max(1,Math.floor(base.height*.115)));
+ // Tight Symbol crops based on the supplied Telegram examples.
+ // The previous version used the entire top 10.5% of the screenshot; that
+ // included the iPhone status bar and user annotations (red circles), which
+ // could turn SUI into ESU. Keep the OCR box around the actual Telegram
+ // search field and the #SYMBOL/USDT header only.
+ const searchBar=cropCanvas(base,Math.floor(base.width*.055),Math.floor(base.height*.055),
+   Math.floor(base.width*.56),Math.floor(base.height*.075));
+ const signalHeader=cropCanvas(base,Math.floor(base.width*.055),Math.floor(base.height*.115),
+   Math.floor(base.width*.56),Math.floor(base.height*.075));
  const top=cropCanvas(base,0,0,base.width,Math.max(1,Math.floor(base.height*.22)));
  const body=cropNorm(base,rect,.02,.08,.98,.45);
  const date=cropCanvas(base,
@@ -379,16 +385,29 @@ async function signalOCR(file){
    main=d.text||'';
  }catch(e){throw new Error('Local OCR: '+(e?.message||e));}
 
- // SYMBOL ENGINE: use two dedicated OCR passes for the exact regions shown in
- // the supplied examples. This avoids false Symbols from Entry/TP/date text.
+ // SYMBOL ENGINE: OCR only the two exact Symbol locations from the supplied
+ // examples. Run them in parallel so this does not re-introduce the old 100% hang.
  let symbolCandidates=[];
  try{
-   // The search bar is the clearest and most stable Symbol source in the supplied
-   // Telegram template. Use ONE tiny OCR pass only; the header is already included
-   // in the main strip, so a second dedicated pass only adds latency on iPhone.
-   const sb1=await tess(upscaleCanvas(searchBar,2.6),7,'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/# ');
+   const cleanSymbolCanvas=(src)=>{
+     const c=preprocessCanvas(src,0);
+     const ctx=c.getContext('2d',{willReadFrequently:true});
+     const im=ctx.getImageData(0,0,c.width,c.height),d=im.data;
+     // Remove red annotation strokes/highlights without touching black/blue text.
+     for(let i=0;i<d.length;i+=4){
+       const r=d[i],g=d[i+1],b=d[i+2];
+       if(r>145 && r>g*1.28 && r>b*1.28){ d[i]=d[i+1]=d[i+2]=245; }
+     }
+     ctx.putImageData(im,0,0);
+     return upscaleCanvas(c,3.2);
+   };
+   const [sb1,hd1]=await Promise.all([
+     tess(cleanSymbolCanvas(searchBar),7,'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/#'),
+     tess(cleanSymbolCanvas(signalHeader),7,'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/#')
+   ]);
    symbolCandidates=[...new Set([
      ...collectSearchSymbolCandidates(sb1.text||''),
+     ...collectSearchSymbolCandidates(hd1.text||''),
      ...collectSearchSymbolCandidates(main)
    ])];
  }catch(e){}
@@ -402,6 +421,29 @@ async function signalOCR(file){
  // Verification can be slow because GitHub Pages may have to pass through
  // multiple CORS fallbacks. The high-confidence #TOKEN is returned immediately.
  let symbolVerified=false, symbolScore=0;
+ // Fast BingX-only symbol verification/correction. It is deliberately bounded
+ // to ~1.5s and runs only after OCR; it can correct OCR confusions such as
+ // ESU -> SUI without making the scan wait indefinitely.
+ try{
+   const bases=await Promise.race([
+     getBingXContracts(),
+     new Promise(resolve=>setTimeout(()=>resolve([]),1500))
+   ]);
+   if(Array.isArray(bases)&&bases.length){
+     let best=null;
+     for(const raw of symbolCandidates.length?symbolCandidates:[symbol]){
+       const r=normalizeSymbolAI(raw); if(!r)continue;
+       for(const b of bases){
+         const dist=editDistance(r,b);
+         const maxD=r.length<=4?2:1;
+         if(dist>maxD)continue;
+         const score=100-dist*18-Math.abs(r.length-b.length)*4;
+         if(!best||score>best.score)best={symbol:b,score,raw:r};
+       }
+     }
+     if(best){symbol=best.symbol;symbolVerified=true;symbolScore=best.score;}
+   }
+ }catch(e){}
  let dateValue=normalizeOCRDateFromText(main);
  if(/\bToday\b/i.test(cleanOCRText(main))){
    $('ocrStatus').textContent='📅 TODAY → ใช้วันที่ปัจจุบันของเครื่อง';
